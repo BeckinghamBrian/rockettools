@@ -36,3 +36,7 @@ htmlcov/
 .vs/
 .idea/
 *.swp
+
+# Misc stuff
+package*.json
+node_modules/
