@@ -39,8 +39,8 @@ from CoolProp.CoolProp import PropsSI
 import matplotlib.pyplot as plt
 import MOC_nozzle as MOC
 import pandas as pd
+import shutil
 from os import path
-from pathlib import Path
 import numpy as np
 from molmass import Formula
 
@@ -1442,15 +1442,26 @@ class Engine():
             
 
         # JS docx builder
-        script_dir = Path(__file__).parent
+        # script_dir = Path(__file__).parent
+        script_dir = os.path.dirname(os.path.abspath(__file__))
         js_script  = os.path.join(script_dir, 'generate_report.js')
-        print(os.path.dirname(os.path.abspath(__file__)), flush=True)
-        print(script_dir)
-        print(js_script)
+        
+        print(f"[DEBUG] script_dir : {repr(script_dir)}")
+        print(f"[DEBUG] js_script  : {repr(js_script)}")
+        print(f"[DEBUG] file exists: {os.path.exists(js_script)}")
+
+        # check that the path exists
         if not os.path.exists(js_script):
             print(f"[Engine] WARNING: generate_report.js not found at {js_script}.")
             print(f"[Engine] JSON data written to: {json_path}")
-            return
+            return        
+        
+        # check for node.js installed
+        node_exe = shutil.which('node')
+        if node_exe is None:
+            raise EnvironmentError(
+                "Node.js not found. Install it from https://nodejs.org or add it to PATH."
+            )
         result = subprocess.run(['node', js_script, json_path],
                                 capture_output=True, text=True)
         if result.returncode != 0:

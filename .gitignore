@@ -1,0 +1,38 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual Environments (Recommended to always ignore)
+.venv/
+venv/
+env/
+ENV/
+bin/
+lib/
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+*.egg
+*.spec
+
+# output files
+output/
+
+# Unit test / coverage reports
+.pytest_cache/
+.tox/
+.coverage
+htmlcov/
+
+# Local Environment Variables (Keep secrets out of Git!)
+.env
+.env.local
+
+# IDE Settings (Optional, but common)
+.vscode/
+.vs/
+.idea/
+*.swp
