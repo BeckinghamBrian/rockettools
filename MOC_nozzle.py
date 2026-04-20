@@ -8,8 +8,6 @@ Code and method from https://www.benjaminmunro.com/moc, modified to plot
 nozzle out to design exit radius
 """
 
-import matplotlib.pyplot as plt
-import math
 import numpy as np
 from scipy import optimize
 

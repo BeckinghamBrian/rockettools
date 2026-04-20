@@ -1,267 +1,144 @@
 # -*- coding: utf-8 -*-
 """
-Engine_Class.py
+Created on Sat Jan  8 13:41:48 2022
 
-This module takes user input and returns heat transfer simulation plots,
-performance plots, and geometric sizing for chemical rocket engines.
-
-run program with input file or import class and use within other functions
-to run directly:   python Engine_Class.py my_engine.toml [dpi] [output_path]
-
-takes arguments
-# argv[1]  : path to TOML input file            (required)
-# argv[2]  : DPI for saved plots                (optional, default 150)
-# argv[3]  : output directory for nozzle geo    (optional, default '.')
-
-Raises:
-    ImportError: checks for tomllib to be installed
-    ValueError: checks if mono propellant combination adds to 100%
-    ValueError: checks if fuel propellant combination adds to 100%
-    ValueError: checks if oxidizer propellant combination adds to 100%
-    Exception: propellant flow rates are unavailable in monopropellant mode
-    ValueError: checks for starting temperature of propellant in tank
-    ValueError: checks for the thermal conductivity of the chamber wall
-    ValueError: checks for the thermal conductivity of the regen fluid
-    ValueError: checks for the chamber wall thickness
-    ValueError: checks for the regen channel height
-    ValueError: checks for the regen channel wall thickness
-    ValueError: checks for the number of regen channels
-    Exception: regen cooling is unavailable in monopropellant mode
-    Exception: heat transfer plots are unavailable in monopropellant mode
-
-Output:
-    generates a javasccript report of file type docx that captures all input data
-    and the resulting outputs.
+@author: brian
 """
 
 from rocketcea.cea_obj import CEA_Obj, add_new_fuel, add_new_oxidizer, add_new_propellant
 from CoolProp.CoolProp import PropsSI
 import matplotlib.pyplot as plt
+import math
 import MOC_nozzle as MOC
 import pandas as pd
 from os import path
-from pathlib import Path
 import numpy as np
 from molmass import Formula
 
 class Engine():
 
-    def __init__(self, thrust=0.0, Pc=0.0, OF=0.0, height_of_optimization=0.0, burnTime=0.0,
-                 input_file=None):
-        """
-        Args:
-            thrust (float, optional): 
-                Designed thrust of. Defaults to 0.
-            Pc (float, optional): 
-                Designed chamber pressure. Defaults to 0.
-            OF (float, optional): 
-                Designed mixture ratio (oxidizer / fuel) by mass. Defaults to 0.
-            height_of_optimization (float, optional): 
-                Altitude that the engine is perfectly expanded. Defaults to 0.
-            burnTime (float, optional): 
-                Burntime in seconds. Defaults to 0.
-            input_file (_type_, optional): 
-                Path to a .toml input file.  Any value in the file overrides the
-                corresponding argument or default set below.  The five required
-                parameters (OF, Pc, thrust, height_of_optimization, burnTime) may
-                be omitted from the constructor call entirely when input_file is
-                provided. Defaults to None.
-        """
-
-        # Required engine parameters (may be overridden by input_file)
-        self.OF                   = OF
-        self.Pc_psi               = Pc
-        self.thrust_lbf           = thrust        # lbf value before conversion
+    def __init__(self, thrust=0, Pc=0, OF=0, height_of_optimization=0, burnTime=0):
+        
+        self.engine_name = ''
+        self.thrust = thrust * 4.44822162 # convert to N
+        self.burnTime = burnTime
+        self.Pc_psi = Pc 
+        self.Pc = self.Pc_psi * 6894.75729 # convert to Pa
+        self.OF = OF
+        self.num_characteristics = 300
+        self.Lstar = 1
+        self.alpha = 30
+        self.beta = 15
         self.height_of_optimization = height_of_optimization
-        self.burnTime             = burnTime
-
-        self.engine_name          = ''
-        self.num_characteristics  = 300
-        self.Lstar                = 1
-        self.alpha                = 30
-        self.beta                 = 15
-
-        self.coolantTempStart     = 300
-        self.Kwall                = 0
-        self.Kc                   = 0
+        self.Pa = 101325*(1-(2.25577)*(10**(-5))*self.height_of_optimization)**5.25588
+        self.Pe = self.Pa # assumed perfect expansion
+        self.PcOvPe = self.Pc/self.Pe
+        
+        self.coolantTempStart = 300
+        self.Kwall = 0
+        self.Kc = 0
         self.chamberWallThickness = 0
-        self.channelHeight        = 0
+        self.channelHeight = 0
         self.channelWallThickness = 0
-        self.numChannels          = 0
-        self.temp_step            = 1
-        self.coefThermEx          = 0
-        self.youngMod             = 0
-
-        self.currFuel             = 'Ethanol'
-        self.currOx               = 'O2'
-        self.currMono             = 'H2O2'
-        self.oxCooled             = False
-
-        # OF sweep bounds for plotIspVOF (overrideable)
-        self.OF_low               = 1.0
-        self.OF_high              = 4.0
-
-        # plot section, controls whether that plot is generated in generate_report()
-        # overrideable via input file
-        self.plot_engine_contour    = True
-        self.plot_nozzle_contour    = True
-        self.plot_isp_vs_of         = True
-        self.plot_mach              = True
-        self.plot_heat_flux         = True
-        self.plot_wall_temp         = True
-        self.plot_thermal_stress    = True
-        self.plot_coolant_velocity  = True
-        self.plot_hx_coefficient    = True
-        self.plot_coolant_temp      = True
-        self.plot_channel_width     = True
-
-        # report output settings
-        self.report_output_dir      = '.'   # directory where report files are saved
-        self.report_dpi             = 150   # DPI for plot images embedded in report
-
+        self.numChannels = 0
+        self.temp_step = 1
+        self.coefThermEx = 0
+        self.youngMod = 0
+        
+        self.currFuel='Ethanol'
+        self.currOx='O2'
+        self.currMono='H2O2'
+        self.oxCooled=False
+        
         ################# ADD NEW MONOPROP   ########################################
-        self.monoMode             = 0
-        self.newMonoBool          = 0
-        self.newMonoName          = ''
-        self.newMono              = [['H2O2(L)', 'H 2 O 2', '100']]
 
+        # Use code in monoprop mode
+        # monoprop mode WILL override bi prop mode
+        self.monoMode=0
+
+        # 1 = new monoprop WILL be used for analysis, 0 = new monoprop will NOT be used
+        # monoprop defaults to peroxide
+        self.newMonoBool=0
+
+        # name for new fuel
+        self.newMonoName = ''
+
+        # mono_component_name, elemental_composition, percent_weight
+        # add as many rows as needed
+        self.newMono = [['H2O2(L)'   ,'H 2 O 2'      ,    '100']]
+        
         #################     ADD NEW FUEL    #######################################
-        self.newFuelBool          = 0
-        self.newFuelName          = '75_ETH'
-        self.newFuel              = [['C2H5OH(L)', 'C 2 H 6 O 1', '75', 'Ethanol'],
-                                     ['H2O(L)',    'H 2 O 1',     '25', 'Water']]
 
-        #################     ADD NEW OXIDIZER    ###################################
-        self.newOxBool            = 0
-        self.newOxName            = 'GelN2O4'
-        self.newOx                = [['N2O4(L)', 'N 2 O 4',  '96.5'],
-                                     ['SiO2',    'Si 1 O 2', '3.5']]
+        # 1 = new fuel WILL be used for analysis, 0 = new fuel will NOT be used
+        # fuel defaults to pure ethanol
+        self.newFuelBool=0
 
-        # checck if input file was provided
-        if input_file is not None:
-            self._load_input_file(input_file)
+        # name for new fuel
+        self.newFuelName = '75_ETH'
 
-        # take class input variables
-        self.thrust    = self.thrust_lbf * 4.44822162          # convert lbf → N
-        self.Pc        = self.Pc_psi * 6894.75729              # convert psi → Pa
-        self.Pa        = 101325 * (1 - 2.25577e-5 * self.height_of_optimization) ** 5.25588
-        self.Pe        = self.Pa                               # assumed perfect expansion
-        self.PcOvPe    = self.Pc / self.Pe
+        # fuel_component_name, elemental_composition, percent_weight, chemical name
+        # add as many rows as needed
+        self.newFuel = [['C2H5OH(L)' ,'C 2 H 6 O 1'  ,    '75',          'Ethanol'],
+                        ['H2O(L)'    ,'H 2 O 1'      ,    '25',          'Water']]
+        
+        #################     ADD NEW OXIDIZER    #######################################
 
-    # parse input file and accept variable values
-    def _load_input_file(self, filepath):
-        """
-        Parse a TOML input file and apply its values to this Engine instance.
+        # 1 = new fuel WILL be used for analysis, 0 = new fuel will NOT be used
+        # fuel defaults to liquid oxygen
+        self.newOxBool=0
 
-        TOML is Python-native via the built-in `tomllib` (Python 3.11+) or the
-        `tomli` back-port for earlier versions.  It is a simple key=value format
-        that maps directly to Python types (int, float, bool, str, list-of-lists)
-        with zero custom parsing logic required.
+        # name for new ox
+        self.newOxName = 'GelN2O4'
 
-        Supported keys
-        --------------
-        Required (at least these should appear in every input file):
-            OF, Pc, thrust, height_of_optimization, burnTime
+        # ox_component_name, elemental_composition, percent_weight
+        # add as many rows as needed
+        self.newOx = [['N2O4(L)'   ,'N 2 O 4'      ,    '96.5'],
+                      ['SiO2'      ,'Si 1 O 2'     ,    '3.5']]
 
-        Optional overrides (all Engine defaults apply when absent):
-            engine_name, num_characteristics, Lstar, alpha, beta,
-            coolantTempStart, Kwall, Kc, chamberWallThickness,
-            channelHeight, channelWallThickness, numChannels, temp_step,
-            coefThermEx, youngMod, currFuel, currOx, oxCooled,
-            monoMode, newMonoBool, newMonoName, newMono,
-            newFuelBool, newFuelName, newFuel,
-            newOxBool, newOxName, newOx,
-            OF_low, OF_high
-        """
-        try:
-            import tomllib          # Python 3.11+
-        except ImportError:
-            try:
-                import tomli as tomllib   # pip install tomli  (Python < 3.11)
-            except ImportError:
-                raise ImportError(
-                    "TOML support requires Python 3.11+ (built-in tomllib) "
-                    "or the 'tomli' package (pip install tomli)."
-                )
 
-        with open(filepath, 'rb') as f:
-            data = tomllib.load(f)
-
-        # whitelist attributes the input file is allowed to set
-        # Pc, Pa, thrust are recomputed after this
-        allowed = {
-            # required mission parameters
-            'OF', 'Pc_psi', 'thrust_lbf', 'height_of_optimization', 'burnTime',
-            # geometry / design
-            'engine_name', 'num_characteristics', 'Lstar', 'alpha', 'beta',
-            # heat transfer / cooling
-            'coolantTempStart', 'Kwall', 'Kc', 'chamberWallThickness',
-            'channelHeight', 'channelWallThickness', 'numChannels',
-            'temp_step', 'coefThermEx', 'youngMod',
-            # propellant selection
-            'currFuel', 'currOx', 'oxCooled',
-            'newFuelBool', 'newFuelName', 'newFuel',
-            'newOxBool', 'newOxName', 'newOx',
-            'monoMode', 'newMonoBool', 'newMonoName', 'newMono',
-            # OF sweep
-            'OF_low', 'OF_high',
-            # plot selection flags
-            'plot_engine_contour', 'plot_nozzle_contour', 'plot_isp_vs_of',
-            'plot_mach', 'plot_heat_flux', 'plot_wall_temp', 'plot_thermal_stress',
-            'plot_coolant_velocity', 'plot_hx_coefficient', 'plot_coolant_temp',
-            'plot_channel_width',
-            # report settings
-            'report_output_dir', 'report_dpi',
-        }
-
-        for key, value in data.items():
-            if key in allowed:
-                setattr(self, key, value)
-            else:
-                print(f"[Engine] WARNING: unknown input key '{key}' ignored.")
-
+        
     def getCeaProperties(self):
         
         if self.newMonoBool:
             
-            # pull the weight percentages out of the new propellant data and sum to check that it meets 100%        
+            # create new mono card for rocketCEA and add together the prop weight percentages
+            mono_weight_percent=0
+            self.newMonoCard=''
+            for i in range(len(self.newMono)):
+                mono_weight_percent = mono_weight_percent + float(self.newMono[i][2])
+                self.newMonoCard=self.newMonoCard+'name '+self.newMono[i][0]+' '+self.newMono[i][1]+' wt%='+self.newMono[i][2]+' '
+    
             # throw error if components do not add to 100% weight
-            if np.sum(np.array([row[2] for row in self.newMono], dtype=float)) != 100:
+            if mono_weight_percent != 100:
                 raise ValueError('NEW PROPELLANT COMPONENTS DO NOT ADD TO 100%')
-
-            # build new propellant card string
-            self.newMonoCard = ' '.join(
-                'name ' + row[0] + ' ' + row[1] + ' wt%=' + row[2]
-                for row in self.newMono
-            )
 
 
         if self.newFuelBool:
             
-            # pull the weight percentages out of the new propellant data and sum to check that it meets 100%
+            # create new fuel card for rocketCEA and add together the fuel weight percentages
+            fuel_weight_percent=0
+            self.newFuelCard=''
+            for i in range(len(self.newFuel)):
+                fuel_weight_percent = fuel_weight_percent + float(self.newFuel[i][2])
+                self.newFuelCard=self.newFuelCard+'fuel '+self.newFuel[i][0]+' '+self.newFuel[i][1]+' wt%='+self.newFuel[i][2]+' '
+    
             # throw error if components do not add to 100% weight
-            if np.sum(np.array([row[2] for row in self.newFuel], dtype=float)) != 100:
+            if fuel_weight_percent != 100:
                 raise ValueError('NEW FUEL COMPONENTS DO NOT ADD TO 100%')
-
-            # build new propellant card string
-            self.newFuelCard = ' '.join(
-                'fuel ' + row[0] + ' ' + row[1] + ' wt%=' + row[2]
-                for row in self.newFuel
-            )
             
 
         if self.newOxBool:
+            
+            # create new fuel card for rocketCEA and add together the fuel weight percentages
+            ox_weight_percent=0
+            self.newOxCard=''
+            for i in range(len(self.newOx)):
+                ox_weight_percent = ox_weight_percent + float(self.newOx[i][2])
+                self.newOxCard=self.newOxCard+'oxid '+self.newOx[i][0]+' '+self.newOx[i][1]+' wt%='+self.newOx[i][2]+' '
     
-            # pull the weight percentages out of the new propellant data and sum to check that it meets 100%
             # throw error if components do not add to 100% weight
-            if np.sum(np.array([row[2] for row in self.newOx], dtype=float)) != 100:
+            if ox_weight_percent != 100:
                 raise ValueError('NEW OXIDIZER COMPONENTS DO NOT ADD TO 100%')
-
-            # build new propellant card string
-            self.newOxCard = ' '.join(
-                'oxid ' + row[0] + ' ' + row[1] + ' wt%=' + row[2]
-                for row in self.newOx
-            )
         
         # monoprop mode overrides bi prop mode
         if self.monoMode:
@@ -302,15 +179,16 @@ class Engine():
         
         self.getCeaProperties()
         
-        # create an array of several expansion ratios to analytically see how changes effect performance
         eps = [self.eps-5, self.eps, self.eps+5]
         for e in eps:
-            
-            # create an array of mixture ratios between levels specified in user input
-            # these will be combined with the expansion ratio with the isps plotted for various points
-            mrArr = np.arange(self.OF_low, self.OF_high, 0.05)  
-            ispArr = [self.rocketcea_eng_obj.get_IvacCstrTc(self.Pc_psi, MR, e)[0] for MR in mrArr]
+            ispArr = []
 
+            MR = self.OF_low
+            mrArr = []
+            while MR < self.OF_high:
+                ispArr.append(self.rocketcea_eng_obj.get_IvacCstrTc(self.Pc_psi, MR, e)[0])
+                mrArr.append(MR)
+                MR += 0.05
             plt.plot(mrArr, ispArr, label='AreaRatio %d'%e)
             
         plt.title('Isp v. MR')
@@ -328,41 +206,43 @@ class Engine():
         
         self.MM = self.MM/1000
         self.Rbar = R/self.MM
-        pi = np.pi
+        pi = math.pi
 
         # Calculations
         self.To = self.Tc # stagnation temp K assumed to be adiabatic flame temp in chamber
         self.Pt = self.Pc*(1+((self.gamma-1)/2))**(-self.gamma/(self.gamma-1)) # pressure at throat Pa
         self.Tt = self.Tc*(1/(1+((self.gamma-1)/2))) # Throat temp K
-        self.Me = np.sqrt((2/(self.gamma-1))*(((self.Pc/self.Pa)**((self.gamma-1)/self.gamma))-1)) # Mach at exit
+        self.Me = math.sqrt((2/(self.gamma-1))*(((self.Pc/self.Pa)**((self.gamma-1)/self.gamma))-1)) # Mach at exit
         self.Po = self.Pt*(1/(1+(((self.gamma-1)/2)))**(-self.gamma/(self.gamma-1))) # stagnation pressure Pa using Pt
-        self.Ueq = np.sqrt(((2*self.gamma)/(self.gamma-1))*self.Rbar*self.To*(1-((self.Pe/self.Po)**((self.gamma-1)/self.gamma)))) # exit velocity m/s
+        self.Ueq = math.sqrt(((2*self.gamma)/(self.gamma-1))*self.Rbar*self.To*(1-((self.Pe/self.Po)**((self.gamma-1)/self.gamma)))) # exit velocity m/s
         self.mdot = self.thrust/self.Ueq # kg
 
         self.mdotFuel = self.mdot / (self.OF + 1)
         self.mdotOx = self.mdot - self.mdotFuel
 
-        bigGamma = np.sqrt(self.gamma*((2/(self.gamma+1))**((self.gamma+1)/(self.gamma-1))))
-        self.At = (self.mdot*np.sqrt(self.Rbar*self.To))/(self.Po*bigGamma) # area of the throat m2
+        bigGamma = math.sqrt(self.gamma*((2/(self.gamma+1))**((self.gamma+1)/(self.gamma-1))))
+        self.At = (self.mdot*math.sqrt(self.Rbar*self.To))/(self.Po*bigGamma) # area of the throat m2
         self.Ae = (self.At/self.Me)*((1+((self.gamma-1)/2)*(self.Me**2))/((self.gamma+1)/2))**((self.gamma+1)/(2*(self.gamma-1))) # area of the exit m2
 
         self.Isp = self.Ueq/9.81
 
         self.cp = (self.gamma/(self.gamma-1))*self.Rbar
 
-        self.Dt = np.sqrt((4/pi)*self.At)
-        self.De = np.sqrt((4/pi)*self.Ae)
+        self.Dt = math.sqrt((4/pi)*self.At)
+        self.De = math.sqrt((4/pi)*self.Ae)
         self.Dc = self.Dt*3
 
 
-        self.Ac = (np.pi * self.Dc**2)/4
+        self.Ac = (math.pi * self.Dc**2)/4
         self.Vc = self.Lstar*self.At
         self.Lc = self.Vc / (1.1 * self.Ac)
 
-        # solving for the chamber diameter iteratively
-        self.theta = np.tan(np.radians(self.beta))
-        for _ in np.arange(10):
-            self.Dc = np.sqrt((self.Dt**3 + (24/np.pi)*self.theta*self.Vc) / (self.Dc + 6*self.theta*self.Lc))
+        # solving for chamber diameter iteratively
+        self.theta = math.tan(math.radians(self.beta))
+        i = 0
+        while i < 10:
+            self.Dc = math.sqrt((self.Dt**3 + (24/math.pi)*self.theta*self.Vc) / (self.Dc + 6*self.theta*self.Lc))
+            i = i + 1
 
         # nozzle geometry curves
         self.Re = self.De / 2
@@ -373,16 +253,16 @@ class Engine():
         self.Rc = self.Dc / 2
 
         # distances from throat (negative)
-        tan = np.tan(np.radians(self.alpha))
-        # sin = np.sin(np.radians(self.alpha))
-        cos = np.cos(np.radians(self.alpha))
+        tan = math.tan(math.radians(self.alpha))
+        # sin = math.sin(math.radians(self.alpha))
+        cos = math.cos(math.radians(self.alpha))
         self.throat = 0
-        self.endStraight = -1*((self.Rc2 - (self.Rc2*cos)) / np.tan(np.radians(self.alpha/2)))*1000
+        self.endStraight = -1*((self.Rc2 - (self.Rc2*cos)) / math.tan(math.radians(self.alpha/2)))*1000
         conv_vert_portion = self.Rc - self.Rt - (self.Rc2 - (self.Rc2*cos)) - (self.Rc1 - (self.Rc1*cos))
         self.endRc1 = self.endStraight - (conv_vert_portion / tan)*1000
-        self.endChamber = self.endRc1 - ((self.Rc1 - (self.Rc1*cos)) / np.tan(np.radians(self.alpha/2)))*1000
+        self.endChamber = self.endRc1 - ((self.Rc1 - (self.Rc1*cos)) / math.tan(math.radians(self.alpha/2)))*1000
         self.startChamber = self.endChamber - self.Lc*1000
-        self.endRc3 = 1000*(self.Rc3 * np.cos(np.radians(90-self.beta))) / (np.tan(np.radians(self.beta)))
+        self.endRc3 = 1000*(self.Rc3 * math.cos(math.radians(90-self.beta))) / (math.tan(math.radians(self.beta)))
            
     def propFlowRates(self):
         
@@ -511,55 +391,132 @@ class Engine():
         Re = self.Re * 1000
         
         # these no longer get used
-        # thetaN = np.radians(40) # degrees to rad
-        # thetaE = np.radians(20) # degrees to rad
+        # thetaN = math.radians(40) # degrees to rad
+        # thetaE = math.radians(20) # degrees to rad
+        
+        # sets the start point of the engine and initializes lists
+        self.engineX = [self.startChamber]
+        self.engineY = []
+        
+        x = self.engineX[0]
+        
+        i=0
+        # solves for the curves that make up the engine up to the throat in 0.01 mm intervals
+        while True:
 
-        # full x array up to the throat
-        engineX_conv = np.round(
-            np.arange(self.startChamber, 0.0 + 0.005, 0.01), 2
-        )
-
-        # Pre-compute straight-section slope & intercept
-        x1 = self.endRc1
-        y1 = np.sqrt(abs(((3*Rt)**2) - (self.endRc1 - self.endChamber)**2)) + (Rc - 3 * Rt)
-        x2 = self.endStraight
-        y2 = (Rt + 1.5 * Rt) - np.sqrt(abs(((1.5*Rt)**2) - (self.endStraight)**2))
-        m  = (y1 - y2) / (x1 - x2)
-        b  = y1 - m * x1
-
-        # CHANGE: define a scalar function for the piecewise radius, then apply via
-        # np.vectorize so each x-value is evaluated without a Python-level for-loop.
-        # Math inside is unchanged — identical to the original if/elif branches.
-        def _radius_at(x):
-            # chamber — constant radius (cylindrical)
-            if x <= self.endChamber:
-                return Rc
-            # first curve in conv section — double-radius curve
-            if x <= self.endRc1:
-                return np.sqrt(abs(((3*Rt)**2) - (x - self.endChamber)**2)) + (Rc - 3 * Rt)
-            # straight conv section — line connecting the two curves
-            if x <= self.endStraight:
-                return m * x + b
-            # curve into throat — 1.5*Rt radius circle
-            return (Rt + 1.5 * Rt) - np.sqrt(abs(((1.5*Rt)**2) - x**2))
-
-        # apply all contour math across the length of the chamber and compute y points
-        engineY_conv = np.vectorize(_radius_at)(engineX_conv)
-
-        # get nozzle geometry from MOC_nozzle
-        nozX_arr, nozY_arr = MOC.nozzle(self.Me, self.num_characteristics, Rt, Re)
-
-        # merge all cells into final lists of the engine profile
-        self.engineX = np.concatenate([engineX_conv, nozX_arr]).tolist()
-        self.engineY = np.concatenate([engineY_conv, nozY_arr]).tolist()
-
-        self.nozX        = nozX_arr
-        self.nozY        = nozY_arr
-        self.nozXContour = nozX_arr.tolist()
-        self.nozYContour = nozY_arr.tolist()
-
-        # create z values of 0 for 3d spline importing
-        self.nozZContour = np.zeros(len(self.nozXContour)).tolist()
+            # chamber
+            # constant radius (cylindrical)
+            if self.engineX[i] <= self.endChamber:
+                self.engineY.append(Rc)
+                
+            # first curve in conv section
+            # this has double the radius of the curve leading into the nozzle
+            if self.endChamber < self.engineX[i] <= self.endRc1:
+                self.engineY.append(math.sqrt(abs(((3*Rt)**2) - (self.engineX[i] - self.endChamber)**2)) + (Rc - 3 * Rt))
+            
+            # straight conv section
+            # straight line connecting the two converging section curves
+            if self.endRc1 < self.engineX[i] <= self.endStraight:
+                
+                # finding the slope of the line between the end and start points
+                # (y - y1) = m(x - x1) + b
+                x1 = self.endRc1
+                y1 = math.sqrt(abs(((3*Rt)**2) - (self.endRc1 - self.endChamber)**2)) + (Rc - 3 * Rt)
+                
+                x2 = self.endStraight
+                y2 = (Rt + 1.5 * Rt) - math.sqrt(abs(((1.5*Rt)**2) - (self.endStraight)**2))
+                
+                # slope of the line
+                m = (y1 - y2) / (x1 - x2)
+                
+                b = y1 - m * x1
+                
+                # y = mx + b
+                self.engineY.append(m * self.engineX[i] + b)
+                
+            # curve into throat
+            # curve based on 1.5 times Rt
+            if self.endStraight < self.engineX[i] <= (self.throat - self.throat):
+                self.engineY.append((Rt + 1.5 * Rt) - math.sqrt(abs(((1.5*Rt)**2) - (self.engineX[i])**2)))
+                
+            # once we reach the throat, break the loop and get nozzle geometry from MOC
+            if self.engineX[i] == 0:
+                break
+            
+        #          This part is replaced with the Method of Characteristics   
+        #
+        ###############################################################################
+        ###############################################################################
+                
+            # circular curve after throat
+        #     # curve based on 0.382 time Rt
+        #     if (throat - throat) < X[i] <= endRc3:
+        #         Y.append((Rt + 0.382 * Rt) - math.sqrt(abs(((0.382*Rt)**2) - (X[i])**2)))
+                
+        #     # parabolic nozzle
+        #     # takes thetaN, Rn, thetaE, and Re and returns the parabolic curve to fit
+        #     if endRc3 < X[i]:
+                
+        #         # finding Rn (the last point in the curve after the throat)
+        #         Rn = (Rt + 0.382 * Rt) - math.sqrt(abs(((0.382*Rt)**2) - (endRc3)**2))
+        
+                
+        # #           Bit off, take 1        
+        # #############################################################################        
+        #         # # linear sys of eqns used to solve for constants for the parabola
+        #         # A = np.array([[2*Rn, 1, 0],[2*Re, 1, 0],[Rn**2, Rn, 1]])
+        #         # B = np.array([[(1/(math.tan(thetaN)))],[(1/(math.tan(thetaE)))],[endRc3]])
+                
+        #         # # constants seen in x = ay^2 + by + c
+        #         # a, b, c = np.linalg.inv(A).dot(B)
+                
+        #         # # quadratic formula to solve for y (the radius)
+        #         # F = (b**2) - 4 * a * (c - X[i])
+        #         # Y.append(((-1*b) + math.sqrt(F)) / (2 * a))
+        # #############################################################################
+        
+        # #           Take , better but needs points from CAD
+        # #############################################################################
+        #         # # linear sys of eqns used to solve for constants for the parabola
+        #         # # uses vertex from CAD in eqn1, Rn in eqn2, and exit in eqn3
+        #         # A = np.array([[8.6257**2, 8.6257, 1],[Rn**2, Rn, 1],[Re**2, Re, 1]])
+        #         # B = np.array([[-5.585],[endRc3],[52.356]])
+                
+        #         # # constants seen in x = ay^2 + by + c
+        #         # a, b, c = np.linalg.inv(A).dot(B)
+                
+        #         # # quadratic formula to solve for y (the radius)
+        #         # F = (b**2) - 4 * a * (c - X[i])
+        #         # Y.append(((-1*b) + math.sqrt(F)) / (2 * a))
+        # #############################################################################
+                
+                
+                
+        #         # if the radius of the exit is reached, exit the loop and give the 
+        #         # values for the nozzle curve to X and Y to be plot
+        #         if Y[i] >= Re:                
+        #             break
+        
+        ###############################################################################
+        ###############################################################################
+                
+            x = round(x + 0.01,2) 
+            self.engineX.append(round(x,2))
+            i = i + 1
+        
+        # get nozzle geometry from MOC_nozzle and 
+        # append the points onto X and Y       
+        self.nozX, self.nozY = MOC.nozzle(self.Me, self.num_characteristics, Rt, Re)
+        self.nozXContour = []
+        self.nozYContour = []
+        self.nozZContour = []
+        for i in range(len(self.nozX)):
+            self.engineX.append(self.nozX[i])
+            self.engineY.append(self.nozY[i])
+            self.nozXContour.append(self.nozX[i])
+            self.nozYContour.append(self.nozY[i])
+            
+        self.nozZContour = [0] * len(self.nozXContour)
         
     def saveNozGeo(self, filePath):
     # saves nozzle geometry in a txt file that can be imported into CAD 
@@ -590,8 +547,7 @@ class Engine():
             j = path.exists(filename)
             k = k + 1
             
-        # create z values of 0 for 3d spline importing
-        self.engineZ = np.zeros_like(self.engineY).tolist()
+        self.engineZ = [x*0 for x in self.engineY]
         df = pd.DataFrame(data={"xVals":self.engineX, "yVals":self.engineY, "zVals":self.engineZ})
         df.to_csv(filename, sep=' ', index = False, header=False)
         
@@ -619,10 +575,8 @@ class Engine():
         
         self.propFlowRates()
         
-        # change from mm to m for heat transfer math
-        X = np.array(self.engineX) / 1000  
-        Y = np.array(self.engineY) / 1000  
-        # flip arrays around to be able to iterate in a single counter flow direction
+        X = [a/1000 for a in self.engineX]
+        Y = [b/1000 for b in self.engineY]
         Y = Y[::-1]
         X = X[::-1]
         
@@ -632,25 +586,24 @@ class Engine():
         r = 0.9 # some other constant fr dunno
         
         self.Te = self.Tc / (1 + ((self.gamma-1)/2)*self.Me**2) # exit temp (works for freestream temp too)
-
-        # create arrays of 0s for the math to be completed on
-        n = len(X)
-
-        self.oTo          = np.zeros(n)           
-        self.hg           = np.ones(n)            
-        self.qw           = np.zeros(n)           
-        self.qw_safer     = np.zeros(n)           
-        self.M            = np.zeros(n)           
-        self.T            = np.zeros(n)           
-        self.Tr           = np.zeros(n)           
-        self.Tw1          = np.full(n, 350.0)     
-        self.Tw2          = np.zeros(n)           
-        self.thermalStress= np.zeros(n)           
-        # TCoolant has n+1 elements (one per station plus the outlet)
-        self.TCoolant     = np.full(n + 1, float(self.coolantTempStart))  
-        self.hc           = np.ones(n)            
-        self.coolV        = np.zeros(n)           
-        self.channelWidth = np.zeros(n)           
+        
+        self.oTo = [0] * len(X) # K location temp averaged from local temp T and temp of wall Tw
+        self.hg = [1] * len(X) # convection coef for combustion gases
+        self.qw =[0] * len(X) # W/m2 heat flux thru wall
+        self.qw_safer = [0] * len(X) # heat flux with added safety factor
+        self.M =[0] * len(X) # Mach number along flow thru nozzle
+        # area=[0] * len(X)
+        self.T = [0] * len(X) # K local temp along flow
+        self.Tr = [0] * len(X) # K local recovery temp 
+        self.Tw1 = [350] * len(X)
+        self.Tw2 = [0] * len(X)
+        self.thermalStress = [0] * len(X)
+        self.TCoolant = [self.coolantTempStart] * (len(X)+1)
+        
+        self.hc = [1] * len(X)
+        self.coolV = [0] * len(X)
+        
+        self.channelWidth = [0] * len(X)
         
         xStep = X[1] - X[2] # m x step along engine
         pastThroat = False
@@ -675,16 +628,23 @@ class Engine():
         ####################################################
         ####################################################
         
-        tempCp  = 0
-        tempMu  = 0
+        self.CpDict = {}
+        self.rhoDict = {}
+        self.muDict = {}
+        
+        tempCp = 0
+        tempMu = 0
         tempRho = 0
-        tempArray = np.round(np.arange(self.coolantTempStart, 500, self.temp_step),2)
-
+        tempArray = np.arange(self.coolantTempStart, 500, self.temp_step)
+        
+        for q in range(len(tempArray)):
+            tempArray[q] = round(tempArray[q],2)
+        
         if self.currOx == 'O2' and self.oxCooled:
             # ethanol and water by mole fractions, change this to not be hard coded
             rho = PropsSI('D', 'T', tempArray, 'P', self.Pc, self.fuelComposition)
-            mu  = PropsSI('V', 'T', tempArray, 'P', self.Pc, self.fuelComposition)
-            Cp  = PropsSI('C', 'T', tempArray, 'P', self.Pc, self.fuelComposition)
+            mu = PropsSI('V', 'T', tempArray, 'P', self.Pc, self.fuelComposition)
+            Cp = PropsSI('C', 'T', tempArray, 'P', self.Pc, self.fuelComposition)
             print(rho)
             print(mu)
             print(Cp)
@@ -694,14 +654,14 @@ class Engine():
         elif not self.oxCooled:
             # ethanol and water by mole fractions, change this to not be hard coded
             rho = PropsSI('D', 'T', tempArray, 'P', self.Pc, self.fuelComposition)
-            mu  = PropsSI('V', 'T', tempArray, 'P', self.Pc, self.fuelComposition)
-            Cp  = PropsSI('C', 'T', tempArray, 'P', self.Pc, self.fuelComposition)
-
-        # map the temperature arrays to the specific heat, density, and viscousity
-        self.CpDict  = dict(zip(tempArray, Cp))   
-        self.muDict  = dict(zip(tempArray, mu))   
-        self.rhoDict = dict(zip(tempArray, rho))  
-
+            mu = PropsSI('V', 'T', tempArray, 'P', self.Pc, self.fuelComposition)
+            Cp = PropsSI('C', 'T', tempArray, 'P', self.Pc, self.fuelComposition)
+        
+        for t in range(len(tempArray)):
+            self.CpDict[tempArray[t]] = Cp[t]
+            self.muDict[tempArray[t]] = mu[t]
+            self.rhoDict[tempArray[t]] = rho[t]
+             
         for i in range(len(X)):
             
             # set flag for when the calculations pass nozzle to allow for
@@ -709,6 +669,7 @@ class Engine():
             if X[i] == 0:
                 pastThroat = True
                 
+        
 
             while (abs(self.hg[i]*(self.Tr[i]-self.Tw1[i])) - (self.hc[i]*(self.Tw2[i] - self.TCoolant[i])) > 1):
                 A = np.pi*(Y[i]**2)
@@ -743,8 +704,8 @@ class Engine():
                     
                 #############################################
                 
-                self.T[i]   = (self.Tc / (1+ ((self.gamma-1)/2) * self.M[i]**2))
-                self.Tr[i]  = (self.T[i]*(1+((self.gamma-1)/2)*r*(self.M[i]**2)))
+                self.T[i] = (self.Tc / (1+ ((self.gamma-1)/2) * self.M[i]**2))
+                self.Tr[i] = (self.T[i]*(1+((self.gamma-1)/2)*r*(self.M[i]**2)))
                 self.oTo[i] = ((self.T[i]+self.Tw1[i])/2)
                 
                 
@@ -770,8 +731,8 @@ class Engine():
                 # for the combustion side to stay at temp we want
                 self.Tw2[i] = (self.Tw1[i] - (self.qw_safer[i]/(self.Kwall/(self.chamberWallThickness/1000))))
                 
-                tempCp  = self.CpDict[round(self.TCoolant[i],0)]
-                tempMu  = self.muDict[round(self.TCoolant[i],0)]
+                tempCp = self.CpDict[round(self.TCoolant[i],0)]
+                tempMu = self.muDict[round(self.TCoolant[i],0)]
                 tempRho = self.rhoDict[round(self.TCoolant[i],0)]
 
                 circum = 2*(Y[i] + (self.chamberWallThickness/1000))*np.pi
@@ -810,20 +771,19 @@ class Engine():
             if pastThroat == True and Y[i] == self.Rc:
                 self.numChannels = numChannelsChamber
 
-        self.qw           = self.qw[::-1]
-        self.qw_safer     = self.qw_safer[::-1]
-        self.hc           = self.hc[::-1]
-        self.Tw1          = self.Tw1[::-1]
-        self.Tw2          = self.Tw2[::-1]
-        self.thermalStress= self.thermalStress[::-1]
+
+        self.qw = self.qw[::-1]
+        self.qw_safer = self.qw_safer[::-1]
+        self.hc = self.hc[::-1]
+        self.Tw1 = self.Tw1[::-1]
+        self.Tw2 = self.Tw2[::-1]
+        self.thermalStress = self.thermalStress[::-1]
         self.channelWidth = self.channelWidth[::-1]
-        # change bacck to mm
-        self.channelWidth = self.channelWidth* 1000
-        self.TCoolant     = self.TCoolant[::-1]
-        self.coolV        = self.coolV[::-1]
-        self.M            = self.M[::-1]
-        # shorten the TCoolant array by 1
-        self.TCoolant = self.TCoolant[:-1]
+        self.channelWidth = [x*1000 for x in self.channelWidth]
+        self.TCoolant = self.TCoolant[::-1]
+        self.coolV = self.coolV[::-1]
+        self.M = self.M[::-1]
+        self.TCoolant.pop(-1)
         
         print('Max Thermal Stress in Nozzle (MPa): ',round(max(self.thermalStress),0))
         
@@ -1180,306 +1140,3 @@ class Engine():
         self.savePlots(dpi)
         self.saveNozGeo(path)
         self.plotIspVOF()
-
-    def generate_report(self):
-        """
-        Run all analyses, save selected plots as PNG files, write a JSON data
-        file, then call generate_report.js (Node.js / docx-js) to build the
-        final Word document (.docx).
-
-        Report sections
-        ---------------
-        1. INPUTS        – every user-settable attribute as valid TOML, copy-
-                        pasteable to create a new input file.
-        2. CHAMBER INFO  – all outputs equivalent to printChamberInfo().
-        3. PLOTS         – only the plots whose flag is True, two per page,
-                        sized to fit US Letter (9 × 4 inches each).
-
-        Files written to self.report_output_dir:
-            report_data.json              consumed by generate_report.js
-            plot_<name>.png              one per selected plot
-            <engine_name>_report.docx    final Word document
-        """
-        import os, json, subprocess
-        import matplotlib
-        matplotlib.use('Agg')
-        import matplotlib.pyplot as plt
-
-        out_dir = self.report_output_dir
-        os.makedirs(out_dir, exist_ok=True)
-        dpi = self.report_dpi
-
-        # run analyses
-        self.getCeaProperties()
-        self.engineDimensions()
-        if not self.monoMode:
-            self.propFlowRates()
-            self.heatTransfer()
-
-        # save plots as pngs 9" x 4"
-        FIG_W, FIG_H = 9.0, 4.0
-        saved_plots = []   # [{title, path}, …] consumed by JS builder
-
-        def _save(flag, title, plot_fn):
-            if not flag:
-                return
-            fig, ax = plt.subplots(figsize=(FIG_W, FIG_H), dpi=dpi)
-            plot_fn(fig, ax)
-            slug  = title.lower().replace(' ', '_').replace('/', '_')
-            fname = os.path.join(out_dir, f'plot_{slug}.png')
-            fig.tight_layout()
-            fig.savefig(fname, dpi=dpi)
-            plt.close(fig)
-            saved_plots.append({'title': title, 'path': os.path.abspath(fname)})
-
-        _save(self.plot_engine_contour, 'Engine Contour', lambda fig, ax: (
-            ax.plot(self.engineX, self.engineY),
-            ax.set_aspect(1.0),
-            ax.grid(color='k', alpha=0.25),
-            ax.set_title('Engine Geometry'),
-            ax.set_xlabel('Distance Along Engine Axially (mm)'),
-            ax.set_ylabel('Radius (mm)'),
-        ))
-
-        _save(self.plot_nozzle_contour, 'Nozzle Contour', lambda fig, ax: (
-            ax.plot(self.nozX, self.nozY, 'b'),
-            ax.set_aspect(1.0),
-            ax.grid(color='k', alpha=0.25),
-            ax.set_title('Nozzle Geometry (MOC)'),
-            ax.set_xlabel('Distance Along Engine Axially (mm)'),
-            ax.set_ylabel('Radius (mm)'),
-        ))
-
-        if not self.monoMode:
-            if self.plot_isp_vs_of:
-                fig, ax = plt.subplots(figsize=(FIG_W, FIG_H), dpi=dpi)
-                for e in [self.eps - 5, self.eps, self.eps + 5]:
-                    mr_arr  = np.arange(self.OF_low, self.OF_high, 0.05)
-                    isp_arr = [self.rocketcea_eng_obj.get_IvacCstrTc(self.Pc_psi, MR, e)[0]
-                                for MR in mr_arr]
-                    ax.plot(mr_arr, isp_arr, label=f'AreaRatio {e:.0f}')
-                ax.set_title('Isp vs Mixture Ratio')
-                ax.set_xlabel('Mixture Ratio (O/F)')
-                ax.set_ylabel('Isp (s)')
-                ax.legend()
-                ax.grid(alpha=0.25)
-                fig.tight_layout()
-                fname = os.path.join(out_dir, 'plot_isp_vs_of.png')
-                fig.savefig(fname, dpi=dpi)
-                plt.close(fig)
-                saved_plots.append({'title': 'Isp vs Mixture Ratio',
-                                    'path': os.path.abspath(fname)})
-
-            _save(self.plot_mach, 'Mach Number', lambda fig, ax: (
-                ax.plot(self.engineX, self.M),
-                ax.grid(alpha=0.25),
-                ax.set_title('Mach Number Along Engine'),
-                ax.set_xlabel('Distance Along Engine Axially (mm)'),
-                ax.set_ylabel('Mach Number'),
-            ))
-            _save(self.plot_heat_flux, 'Heat Flux', lambda fig, ax: (
-                ax.plot(self.engineX, self.qw,       label='qw'),
-                ax.plot(self.engineX, self.qw_safer, label='qw safer'),
-                ax.legend(), ax.grid(alpha=0.25),
-                ax.set_title('Heat Flux Along Engine'),
-                ax.set_xlabel('Distance Along Engine Axially (mm)'),
-                ax.set_ylabel('Heat Flux (W/m²)'),
-            ))
-            _save(self.plot_wall_temp, 'Wall Temperature', lambda fig, ax: (
-                ax.plot(self.engineX, self.Tw1, label='Hot Side'),
-                ax.plot(self.engineX, self.Tw2, label='Coolant Side'),
-                ax.legend(), ax.grid(alpha=0.25),
-                ax.set_title('Wall Temperature Along Engine'),
-                ax.set_xlabel('Distance Along Engine Axially (mm)'),
-                ax.set_ylabel('Temperature (K)'),
-            ))
-            _save(self.plot_thermal_stress, 'Thermal Stress', lambda fig, ax: (
-                ax.plot(self.engineX, self.thermalStress),
-                ax.grid(alpha=0.25),
-                ax.set_title('Thermal Stress Along Engine'),
-                ax.set_xlabel('Distance Along Engine Axially (mm)'),
-                ax.set_ylabel('Thermal Stress (kPa)'),
-            ))
-            _save(self.plot_coolant_velocity, 'Coolant Velocity', lambda fig, ax: (
-                ax.plot(self.engineX, self.coolV),
-                ax.grid(alpha=0.25),
-                ax.set_title('Coolant Velocity Along Engine'),
-                ax.set_xlabel('Distance Along Engine Axially (mm)'),
-                ax.set_ylabel('Velocity (m/s)'),
-            ))
-            _save(self.plot_hx_coefficient, 'HX Coefficient', lambda fig, ax: (
-                ax.plot(self.engineX, self.hc),
-                ax.grid(alpha=0.25),
-                ax.set_title('Heat Transfer Coefficient (Cooling Passages)'),
-                ax.set_xlabel('Distance Along Engine Axially (mm)'),
-                ax.set_ylabel('h_c  W/(m²·K)'),
-            ))
-            _save(self.plot_coolant_temp, 'Coolant Temperature', lambda fig, ax: (
-                ax.plot(self.engineX, self.TCoolant),
-                ax.grid(alpha=0.25),
-                ax.set_title('Coolant Temperature Along Passages'),
-                ax.set_xlabel('Distance Along Engine Axially (mm)'),
-                ax.set_ylabel('Temperature (K)'),
-            ))
-            _save(self.plot_channel_width, 'Channel Width', lambda fig, ax: (
-                ax.plot(self.engineX, self.channelWidth),
-                ax.grid(alpha=0.25),
-                ax.set_title('Cooling Channel Width Along Engine'),
-                ax.set_xlabel('Distance Along Engine Axially (mm)'),
-                ax.set_ylabel('Width (mm)'),
-            ))
-
-        # build toml compatible inputs
-        inputs = {
-            'OF':                    self.OF,
-            'Pc_psi':                self.Pc_psi,
-            'thrust_lbf':            self.thrust_lbf,
-            'height_of_optimization': self.height_of_optimization,
-            'burnTime':              self.burnTime,
-            'engine_name':           self.engine_name,
-            'num_characteristics':   self.num_characteristics,
-            'Lstar':                 self.Lstar,
-            'alpha':                 self.alpha,
-            'beta':                  self.beta,
-            'OF_low':                self.OF_low,
-            'OF_high':               self.OF_high,
-            'currFuel':              self.currFuel,
-            'currOx':                self.currOx,
-            'oxCooled':              bool(self.oxCooled),
-            'coolantTempStart':      self.coolantTempStart,
-            'Kwall':                 self.Kwall,
-            'Kc':                    self.Kc,
-            'chamberWallThickness':  self.chamberWallThickness,
-            'channelHeight':         self.channelHeight,
-            'channelWallThickness':  self.channelWallThickness,
-            'numChannels':           self.numChannels,
-            'temp_step':             self.temp_step,
-            'coefThermEx':           self.coefThermEx,
-            'youngMod':              self.youngMod,
-            'monoMode':              self.monoMode,
-            'newMonoBool':           self.newMonoBool,
-            'newMonoName':           self.newMonoName,
-            'newMono':               self.newMono,
-            'newFuelBool':           self.newFuelBool,
-            'newFuelName':           self.newFuelName,
-            'newFuel':               self.newFuel,
-            'newOxBool':             self.newOxBool,
-            'newOxName':             self.newOxName,
-            'newOx':                 self.newOx,
-            'plot_engine_contour':   bool(self.plot_engine_contour),
-            'plot_nozzle_contour':   bool(self.plot_nozzle_contour),
-            'plot_isp_vs_of':        bool(self.plot_isp_vs_of),
-            'plot_mach':             bool(self.plot_mach),
-            'plot_heat_flux':        bool(self.plot_heat_flux),
-            'plot_wall_temp':        bool(self.plot_wall_temp),
-            'plot_thermal_stress':   bool(self.plot_thermal_stress),
-            'plot_coolant_velocity': bool(self.plot_coolant_velocity),
-            'plot_hx_coefficient':   bool(self.plot_hx_coefficient),
-            'plot_coolant_temp':     bool(self.plot_coolant_temp),
-            'plot_channel_width':    bool(self.plot_channel_width),
-            'report_output_dir':     self.report_output_dir,
-            'report_dpi':            self.report_dpi,
-        }
-
-        # build chamber info dict
-        chamber = {
-            'Ae_over_At':    round(self.Ae / self.At, 3),
-            'Pc_kPa':        round(self.Pc / 1000, 2),
-            'Tc_K':          round(self.Tc, 2),
-            'thrust_N':      round(self.thrust, 2),
-            'Pt_kPa':        round(self.Pt / 1000, 2),
-            'Tt_K':          round(self.Tt, 2),
-            'Me':            round(self.Me, 4),
-            'cea_Me':        round(self.cea_Me, 4),
-            'Po_kPa':        round(self.Po / 1000, 2),
-            'To_K':          round(self.To, 2),
-            'Ueq_m_s':       round(self.Ueq, 2),
-            'mdot_kg_s':     round(self.mdot, 3),
-            'Isp_s':         round(self.Isp, 2),
-            'cea_Isp_s':     round(self.cea_Isp, 2),
-            'Cstar_m_s':     round(self.Cstar, 2),
-            'cp_J_kgK':      round(self.cp, 2),
-            'Vc_m3':         round(self.Vc, 6),
-            'Lc_m':          round(self.Lc, 6),
-            'Dc_m':          round(self.Dc, 6),
-            'At_m2':         round(self.At, 6),
-            'Dt_m':          round(self.Dt, 6),
-            'Ae_m2':         round(self.Ae, 6),
-            'De_m':          round(self.De, 6),
-            'Rc_mm':         round(self.Rc  * 1000, 4),
-            'Rc1_mm':        round(self.Rc1 * 1000, 4),
-            'Rc2_mm':        round(self.Rc2 * 1000, 4),
-            'Rt_mm':         round(self.Rt  * 1000, 4),
-            'Rc3_mm':        round(self.Rc3 * 1000, 4),
-            'Re_mm':         round(self.Re  * 1000, 4),
-        }
-        if not self.monoMode:
-            chamber.update({
-                'mdotFuel_kg_s':  round(self.mdotFuel, 3),
-                'mdotOx_kg_s':    round(self.mdotOx, 3),
-                'VdotFuel_L_s':   round(self.VdotFuel, 4),
-                'VdotOx_L_s':     round(self.VdotLOX, 4),
-                'volFuel_L':      round(self.volumeFuel, 2),
-                'volOx_L':        round(self.volumeLOX, 2),
-                'massFuel_kg':    round(self.massFuel, 2),
-                'massOx_kg':      round(self.massLOX, 2),
-                'massProp_kg':    round(self.massProp, 2),
-            })
-
-        # json for JS builder
-        report_name = (self.engine_name.strip() or 'engine') + '_report'
-        data = {
-            'engine_name': self.engine_name or 'Engine Report',
-            'report_name': report_name,
-            'out_dir':     os.path.abspath(out_dir),
-            'inputs':      inputs,
-            'chamber':     chamber,
-            'plots':       saved_plots,
-        }
-        json_path = os.path.join(out_dir, 'report_data.json')
-        with open(json_path, 'w') as f:
-            json.dump(data, f, indent=2)
-            
-
-        # JS docx builder
-        script_dir = Path(__file__).parent
-        js_script  = os.path.join(script_dir, 'generate_report.js')
-        print(os.path.dirname(os.path.abspath(__file__)), flush=True)
-        print(script_dir)
-        print(js_script)
-        if not os.path.exists(js_script):
-            print(f"[Engine] WARNING: generate_report.js not found at {js_script}.")
-            print(f"[Engine] JSON data written to: {json_path}")
-            return
-        result = subprocess.run(['node', js_script, json_path],
-                                capture_output=True, text=True)
-        if result.returncode != 0:
-            print('[Engine] ERROR from generate_report.js:\n', result.stderr)
-        else:
-            print(f"[Engine] Report: {os.path.join(out_dir, report_name + '.docx')}")
-
-    @classmethod
-    def from_file(cls, filepath):
-        """
-        Create an Engine object entirely from a TOML file.
-
-        Usage
-        -----
-            eng = Engine.from_file('my_engine.toml')
-
-        The five required parameters (OF, Pc_psi, thrust_lbf,
-        height_of_optimization, burnTime) must be present in the file.
-        All other parameters fall back to class defaults if omitted.
-        """
-        return cls(input_file=filepath)
-
-if __name__ == '__main__':
-    import sys
-    if len(sys.argv) < 2:
-        print("Usage: python Engine_Class.py <input_file.toml> [output_dir]")
-        sys.exit(1)
-
-    engine = Engine.from_file(sys.argv[1])
-    if len(sys.argv) > 2:
-        engine.report_output_dir = sys.argv[2]
-    engine.generate_report()

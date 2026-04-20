@@ -40,7 +40,7 @@ C.youngMod = 140
 C.chamberWallThickness = 1 # mm chamber wall thickness
 C.channelHeight = 1 # mm channel height
 C.channelWallThickness = 1 # mm thickness of wall between channels
-C.numChannels = 40 # number of cooling channels (important for Re calcs) 23
+C.numChannels = 40 # number of cooling channels (important for Re calcs)
 C.temp_step = 0.1
 
 # Isp vs OF plot criteria
@@ -57,7 +57,7 @@ C.printChamberInfo()
 # C.plotNozzleContour()
 # C.plotEngineContour()
 # C.savePlots(300)
-# C.allPlots()
+C.allPlots()
 # C.saveNozGeo('B:/brian/Documents/Rockets/Long Shot/Engine/V2 Plots - Geo')
 # C.saveChamberGeo('B:/brian/Documents/Rockets/Hephaestus/Code')
 # C.heatTransfer()

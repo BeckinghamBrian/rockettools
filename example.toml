@@ -1,0 +1,138 @@
+# =============================================================================
+# Engine_Class input file
+# Format: TOML  (Tom's Obvious Minimal Language)
+# Parsed by: Python built-in `tomllib` (3.11+) or `pip install tomli` (<3.11)
+#
+# USAGE
+# -----
+#   Python API:
+#       eng = Engine.from_file('example_engine.toml')
+#       eng.generate_report()           # produces <engine_name>_report.docx
+#
+#   Command line:
+#       python Engine_Class.py example_engine.toml
+#
+# HOW IT WORKS
+# ------------
+# Engine.__init__ sets every class default first, then reads this file.
+# Each key here calls setattr(engine, key, value) — only whitelisted keys
+# are accepted.  Derived quantities (Pc in Pa, thrust in N, Pa, Pe, PcOvPe)
+# are ALWAYS recomputed after the file loads, so you only set raw inputs.
+#
+# HOW PLOT SELECTION WORKS
+# ------------------------
+# Each plot_ key is a boolean flag.  Set to false to suppress that plot from
+# the report.  Suppressed plots are never computed or saved to disk.
+# Plots that require heat-transfer data are automatically skipped in
+# monoprop mode regardless of flags.
+#
+# HOW THE REPORT IS GENERATED
+# ----------------------------
+# Engine_Class.generate_report() (Python):
+#   1. Runs analyses (getCeaProperties, engineDimensions, heatTransfer...)
+#   2. Saves each enabled plot as a PNG to report_output_dir
+#   3. Dumps report_data.json with all inputs, chamber results, and plot paths
+#   4. Calls `node generate_report.js report_data.json`
+# generate_report.js (Node.js / docx-js):
+#   1. Reads report_data.json
+#   2. Builds a Word document with three sections:
+#        Section 1 - INPUTS (TOML-formatted table; values are copy-pasteable)
+#        Section 2 - CHAMBER INFO & DIMENSIONS
+#        Section 3 - PLOTS (two per page, 9 x 4 inches each)
+#   3. Writes <engine_name>_report.docx to report_output_dir
+#
+# TYPES
+# ------
+# TOML maps directly to Python:
+#   integer   →  int          floats  →  float
+#   "string"  →  str          true/false → bool
+#   [[array of tables]] or inline arrays of arrays → list[list]
+# =============================================================================
+
+# required param
+
+OF                      = 2.1          # Oxidiser-to-fuel mass ratio
+Pc_psi                  = 300.0        # Chamber pressure (psi)
+thrust_lbf              = 500.0        # Thrust (lbf)  — converted to N internally
+height_of_optimization  = 0.0         # Altitude for nozzle optimisation (m)
+burnTime                = 30.0         # Burn duration (s)
+
+# optional param
+
+engine_name           = "Demo_500lbf"
+num_characteristics   = 300          # MOC characteristic lines for nozzle contour
+Lstar                 = 1.0          # Characteristic chamber length (m)
+alpha                 = 30           # Converging half-angle (degrees)
+beta                  = 15           # Diverging initial half-angle (degrees)
+
+# OF sweep range for plotIspVOF
+
+OF_low                = 1.0
+OF_high               = 4.0
+
+# Propellant selection
+
+currFuel              = "Ethanol"    # CEA fuel name (ignored when newFuelBool = 1)
+currOx                = "O2"         # CEA oxidiser name (ignored when newOxBool = 1)
+oxCooled              = false        # true = cool with oxidiser instead of fuel
+monoMode              = 0            # 0 = biprop, 1 = monoprop
+newMonoBool           = 0            # 1 to define custom monoprop, 0 = use default (H2O2)
+newMonoName           = "MyMono"
+newFuelBool           = 1           # 1 to define custom fuel, 0 = use rocketcea fuel
+newFuelName           = "75_ETH"
+newOxBool             = 0           # 1 to define custom ox, 0 = use rocketcea ox
+newOxName             = "GelN2O4"
+
+# Each sub-array: [CEA_component_name, elemental_composition, wt_percent]
+# Weights must sum to 100.
+newMono               = [["H2O2(L)", "H 2 O 2", "100"]]
+
+# Each sub-array: [CEA_name, elemental_composition, wt_percent, CoolProp_name]
+newFuel               = [
+    ["C2H5OH(L)", "C 2 H 6 O 1", "75", "Ethanol"],
+    ["H2O(L)",    "H 2 O 1",     "25", "Water"  ],
+]
+
+# Each sub-array: [CEA_name, elemental_composition, wt_percent]
+newOx                 = [
+    ["N2O4(L)", "N 2 O 4",  "96.5"],
+    ["SiO2",    "Si 1 O 2", "3.5" ],
+]
+
+# regen cooling param
+
+coolantTempStart      = 300.0        # Coolant inlet temp (K)
+Kwall                 = 12.0         # Wall thermal conductivity  W/(m·K)  — Inconel 718 ≈ 12
+Kc                    = 0.17         # Coolant thermal conductivity  W/(m·K) — ethanol ≈ 0.17
+chamberWallThickness  = 1.5          # Chamber wall thickness (mm)
+channelHeight         = 3.0          # Cooling channel depth (mm)
+channelWallThickness  = 0.8          # Wall between channels (mm)
+numChannels           = 60           # Number of cooling channels around circumference
+temp_step             = 1.0          # Inner wall temp increment per convergence iteration (K)
+coefThermEx           = 1.3e-5       # Coefficient of thermal expansion (1/K) — Inconel 718
+youngMod              = 200.0        # Young's modulus (GPa) — Inconel 718
+
+# -- Plot selection -----------------------------------------------------------
+# Set any flag to false to omit that plot from the report.
+# Omitting a key entirely defaults to true (all plots on by default).
+# Plots unavailable in monoprop mode (monoMode=1) are silently skipped.
+# Heat-transfer plots (mach through channel_width) require monoMode = 0.
+
+plot_engine_contour   = true   # Engine cross-section profile (always available)
+plot_nozzle_contour   = true   # MOC nozzle contour only (always available)
+plot_isp_vs_of        = true   # Isp vs mixture ratio sweep (biprop only)
+plot_mach             = true   # Mach number distribution along engine axis
+plot_heat_flux        = true   # Wall heat flux qw and qw_safer
+plot_wall_temp        = true   # Hot-side and coolant-side wall temperatures
+plot_thermal_stress   = true   # Thermal stress along engine wall
+plot_coolant_velocity = true   # Coolant velocity through cooling passages
+plot_hx_coefficient   = true   # Convective HX coefficient h_c through passages
+plot_coolant_temp     = true   # Coolant bulk temperature along passages
+plot_channel_width    = true   # Cooling channel width variation along engine
+
+
+# -- Report output settings ---------------------------------------------------
+
+report_output_dir     = "."           # Directory where .docx and plot PNGs are saved
+report_dpi            = 300           # DPI for saved plot images (150 = good balance;
+                                      # use 300 for high-quality print output)
