@@ -102,15 +102,12 @@ newOx                 = [
 # regen cooling param
 
 coolantTempStart      = 300.0        # Coolant inlet temp (K)
-Kwall                 = 12.0         # Wall thermal conductivity  W/(m·K)  — Inconel 718 ≈ 12
-Kc                    = 0.17         # Coolant thermal conductivity  W/(m·K) — ethanol ≈ 0.17
+Kc                    = 0.17         # Coolant thermal conductivity W/(m·K) — ethanol ≈ 0.17
 chamberWallThickness  = 1.5          # Chamber wall thickness (mm)
 channelHeight         = 3.0          # Cooling channel depth (mm)
 channelWallThickness  = 0.8          # Wall between channels (mm)
 numChannels           = 60           # Number of cooling channels around circumference
 temp_step             = 1.0          # Inner wall temp increment per convergence iteration (K)
-coefThermEx           = 1.3e-5       # Coefficient of thermal expansion (1/K) — Inconel 718
-youngMod              = 200.0        # Young's modulus (GPa) — Inconel 718
 
 # -- Wall material ------------------------------------------------------------
 # Option A: name a key from mat_dict.py (recommended).
@@ -119,15 +116,15 @@ youngMod              = 200.0        # Young's modulus (GPa) — Inconel 718
 #   captured automatically.  The scalar values below are ignored when
 #   wall_material is set to a valid mat_dict key.
 #   Available keys: "Inconel_718", "Copper_OFHC", "SS_304"  (see mat_dict.py)
-#wall_material         = "Inconel_718"
+wall_material         = "Inconel_718"
 
 # Option B: leave wall_material = "" and set scalar values directly.
 #   These are used as constant properties regardless of wall temperature.
 #   Useful when you don't have temperature-dependent data or want a quick run.
 # wall_material         = ""
-#Kwall                 = 12.0         # Wall thermal conductivity W/(m·K)
-#coefThermEx           = 1.3e-5       # Coefficient of thermal expansion (1/K)
-#youngMod              = 200.0        # Young's modulus (GPa)
+Kwall                 = 12.0         # Wall thermal conductivity W/(m·K)
+coefThermEx           = 1.3e-5       # Coefficient of thermal expansion (1/K)
+youngMod              = 200.0        # Young's modulus (GPa)
 
 # -- Plot selection -----------------------------------------------------------
 # Set any flag to false to omit that plot from the report.

@@ -36,6 +36,7 @@ const {
   Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
   ImageRun, Header, Footer, PageNumber, PageBreak,
   AlignmentType, BorderStyle, WidthType, ShadingType, VerticalAlign,
+  PageOrientation,
 } = require('docx');
 
 // ── Design constants ──────────────────────────────────────────────────────────
@@ -49,12 +50,19 @@ const PAGE_H    = 15840;
 const MARGIN    = 1440;
 const CONTENT_W = PAGE_W - 2 * MARGIN;   // 9360 DXA  = 6.5 in
 
-// Image dimensions: full content width × 4 inches
-// docx ImageRun transformation uses pixel-like units (points at screen res).
-// We pass inches converted to "points" where 1 pt ≈ 1 unit here:
-// docx uses pixel dimensions internally; at 96 dpi: 9 in = 864 px, 4 in = 384 px
-const IMG_W_PX = 864;
-const IMG_H_PX = 384;
+// Landscape plot pages: docx-js convention — pass portrait dimensions and set
+// orientation: LANDSCAPE; docx-js swaps width/height in the XML internally.
+// Content width on landscape page = long edge − 2 margins = 15840 − 2880 = 12960 DXA
+const LAND_CONTENT_W = PAGE_H - 2 * MARGIN;   // 12960 DXA  = 9 in
+// Content height on landscape page = short edge − 2 margins = 12240 − 2880 = 9360 DXA
+const LAND_CONTENT_H = PAGE_W - 2 * MARGIN;   // 9360 DXA  = 6.5 in
+
+// Image dimensions for landscape pages: fill the full landscape content width.
+// Each plot PNG was saved at 9 × 4 in by Python.  On landscape we have 9 in
+// of width, so we keep width the same and the aspect ratio handles height.
+// At 96 dpi: 9 in = 864 px wide, 4 in = 384 px tall — fills half the page.
+const IMG_W_PX = 864;   // plot image width in docx pixel units (9 in equivalent)
+const IMG_H_PX = 384;   // plot image height in docx pixel units (4 in equivalent)
 
 // ── Utility builders ──────────────────────────────────────────────────────────
 
@@ -369,10 +377,52 @@ async function main() {
   children.push(spacer(360));
 
   // ══════════════════════════════════════════════════════════════════════════
-  // SECTION 3 · PLOTS
-  // Two plots per page. Each PNG was saved at 9 × 4 inches by Python so it
-  // maps exactly to the content width at any reasonable screen/print zoom.
+  // SECTION 3 · PLOTS  (landscape pages, two plots per page)
+  //
+  // docx supports multiple sections with different page orientations in a
+  // single document.  Portrait sections (cover, inputs, chamber) stay as-is.
+  // Each PAIR of plots gets its own landscape section.  This means:
+  //   - Plots 0+1  → landscape section 1
+  //   - Plots 2+3  → landscape section 2  … etc.
+  //
+  // docx-js landscape convention: pass portrait dimensions (PAGE_W, PAGE_H)
+  // with orientation: PageOrientation.LANDSCAPE — docx-js swaps the axes in
+  // the XML so the long edge becomes the width on screen and in print.
+  //
+  // The "no plots" case adds a single note paragraph to the portrait section
+  // and does not create any landscape sections.
   // ══════════════════════════════════════════════════════════════════════════
+
+  // ── Shared header/footer builders (reused across all sections) ────────────
+  function makeHeader() {
+    return new Header({
+      children: [new Paragraph({
+        border: { bottom: { style: BorderStyle.SINGLE, size: 4, color: 'CCCCCC', space: 1 } },
+        children: [new TextRun({
+          text: `${engine_name || 'Engine'}  —  Analysis Report`,
+          font: 'Arial', size: 18, color: '888888',
+        })],
+      })],
+    });
+  }
+
+  function makeFooter() {
+    return new Footer({
+      children: [new Paragraph({
+        alignment: AlignmentType.RIGHT,
+        children: [
+          new TextRun({ text: 'Page ', font: 'Arial', size: 18, color: '888888' }),
+          new TextRun({ children: [PageNumber.CURRENT], font: 'Arial', size: 18, color: '888888' }),
+          new TextRun({ text: ' of ', font: 'Arial', size: 18, color: '888888' }),
+          new TextRun({ children: [PageNumber.TOTAL_PAGES], font: 'Arial', size: 18, color: '888888' }),
+        ],
+      })],
+    });
+  }
+
+  // ── Portrait section: cover + inputs + chamber ────────────────────────────
+  // Add a heading for Section 3 at the end of the portrait section.
+  // If there are no plots, include a note here instead of making a landscape section.
   children.push(pageBreak());
   children.push(heading('3  ·  Plots', 32, 60));
 
@@ -382,25 +432,67 @@ async function main() {
       'No plots were selected. Set the plot_* flags to true in your input file.',
       { color: '888888' }
     ));
-  } else {
-    plots.forEach((plot, idx) => {
-      // New page for every pair after the first
-      if (idx > 0 && idx % 2 === 0) {
-        children.push(pageBreak());
-      }
+  }
 
-      children.push(heading(plot.title, 24, idx % 2 === 0 ? 180 : 240));
+  const portraitSection = {
+    properties: {
+      page: {
+        size:   { width: PAGE_W, height: PAGE_H },
+        margin: { top: MARGIN, right: MARGIN, bottom: MARGIN, left: MARGIN },
+      },
+    },
+    headers: { default: makeHeader() },
+    footers: { default: makeFooter() },
+    children,
+  };
+
+  // ── Landscape sections: one per pair of plots ─────────────────────────────
+  // Group plots into pairs.  Each pair becomes its own document section with
+  // landscape orientation.  Using separate sections (rather than inline page
+  // breaks inside one section) is the only reliable way to switch orientation
+  // mid-document in the OOXML format that docx-js targets.
+  const landscapeSections = [];
+
+  for (let p = 0; p < plots.length; p += 2) {
+    const pair     = plots.slice(p, p + 2);   // 1 or 2 plots
+    const pairChildren = [];
+
+    pair.forEach((plot, localIdx) => {
+      // Small spacer before the second plot on the same page
+      if (localIdx === 1) pairChildren.push(spacer(200));
+
+      pairChildren.push(heading(plot.title, 24, localIdx === 0 ? 60 : 60));
 
       const imgData = fs.readFileSync(plot.path);
-      children.push(new Paragraph({
-        spacing: { before: 40, after: 60 },
+      pairChildren.push(new Paragraph({
+        spacing: { before: 40, after: 40 },
         children: [new ImageRun({
           type: 'png',
           data: imgData,
+          // On a landscape page the content width is ~9 in — same as the PNG
+          // dimensions, so the image fills the full width with no cropping.
           transformation: { width: IMG_W_PX, height: IMG_H_PX },
           altText: { title: plot.title, description: plot.title, name: plot.title },
         })],
       }));
+    });
+
+    landscapeSections.push({
+      properties: {
+        page: {
+          // Pass portrait dimensions; docx-js + LANDSCAPE orientation swaps
+          // them in the XML so the document renders in landscape correctly.
+          size: {
+            width:       PAGE_W,
+            height:      PAGE_H,
+            orientation: PageOrientation.LANDSCAPE,
+          },
+          margin: { top: MARGIN, right: MARGIN, bottom: MARGIN, left: MARGIN },
+        },
+      },
+      headers: { default: makeHeader() },
+      footers: { default: makeFooter() },
+      children: pairChildren,
     });
   }
 
@@ -411,39 +503,8 @@ async function main() {
         document: { run: { font: 'Arial', size: 20 } },
       },
     },
-    sections: [{
-      properties: {
-        page: {
-          size:   { width: PAGE_W, height: PAGE_H },
-          margin: { top: MARGIN, right: MARGIN, bottom: MARGIN, left: MARGIN },
-        },
-      },
-      headers: {
-        default: new Header({
-          children: [new Paragraph({
-            border: { bottom: { style: BorderStyle.SINGLE, size: 4, color: 'CCCCCC', space: 1 } },
-            children: [new TextRun({
-              text: `${engine_name || 'Engine'}  —  Analysis Report`,
-              font: 'Arial', size: 18, color: '888888',
-            })],
-          })],
-        }),
-      },
-      footers: {
-        default: new Footer({
-          children: [new Paragraph({
-            alignment: AlignmentType.RIGHT,
-            children: [
-              new TextRun({ text: 'Page ', font: 'Arial', size: 18, color: '888888' }),
-              new TextRun({ children: [PageNumber.CURRENT], font: 'Arial', size: 18, color: '888888' }),
-              new TextRun({ text: ' of ', font: 'Arial', size: 18, color: '888888' }),
-              new TextRun({ children: [PageNumber.TOTAL_PAGES], font: 'Arial', size: 18, color: '888888' }),
-            ],
-          })],
-        }),
-      },
-      children,
-    }],
+    // Portrait section first, then one landscape section per plot pair.
+    sections: [portraitSection, ...landscapeSections],
   });
 
   const outPath = path.join(out_dir, report_name + '.docx');

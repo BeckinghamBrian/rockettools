@@ -5,7 +5,7 @@ Created on Wed Feb 19 09:19:20 2020
 @author: M27091
 """
 
-from Engine_Class import Engine
+from Engine_Class  import Engine
 
 # basic engine starting info
 OF = 1.6

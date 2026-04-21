@@ -210,6 +210,8 @@ class Engine():
             'plot_mach', 'plot_heat_flux', 'plot_wall_temp', 'plot_thermal_stress',
             'plot_coolant_velocity', 'plot_hx_coefficient', 'plot_coolant_temp',
             'plot_channel_width',
+            # # wall material for mat_dict lookup
+            # 'wall_material',
             # report settings
             'report_output_dir', 'report_dpi',
         }
@@ -619,6 +621,68 @@ class Engine():
         
         self.propFlowRates()
         
+        # #
+        # #
+        # #
+        # # FIX
+        # #
+        # #
+        # #
+
+        # # ── mat_dict integration ──────────────────────────────────────────────
+        # # If wall_material names a key in mat_dict, Kwall / coefThermEx /
+        # # youngMod are looked up per-station from the dictionary instead of
+        # # being held at the scalar TOML values.
+        # #
+        # # Loading strategy (lazy / low-memory):
+        # #   mat_dict is imported once as a Python module.  Python's module cache
+        # #   (sys.modules) means the file is read from disk only on the very first
+        # #   call; every subsequent call in the same session reuses the already-
+        # #   loaded dict at zero I/O cost.  Only the three properties actually
+        # #   consumed by heatTransfer() are extracted from each entry — the rest
+        # #   of the dict is never touched.
+        # #
+        # # Temperature-dependence strategy:
+        # #   Wall material properties (especially Kwall and youngMod) change
+        # #   significantly with temperature.  Rather than picking one value for
+        # #   the whole engine, we call get_mat_props(material, Tw1[i]) at each
+        # #   station so that the hot-gas side uses the property at the local wall
+        # #   temperature.  get_mat_props() linearly interpolates between the two
+        # #   nearest registered temperature points, so it is fast and requires no
+        # #   additional CoolProp calls.
+        # #
+        # # Fallback:
+        # #   If wall_material is '' or mat_dict cannot be found, the scalar
+        # #   values from self.Kwall / self.coefThermEx / self.youngMod are used
+        # #   unchanged — identical to the original behaviour.
+
+        # _use_mat_dict = False
+        # _mat_get = None   # will be get_mat_props function if available
+
+        # if self.wall_material:
+        #     try:
+        #         import os as _os, sys as _sys, importlib.util as _ilu, importlib as _il
+        #         _mat_path = _os.path.join(
+        #             _os.path.dirname(_os.path.abspath(__file__)), 'mat_dict.py')
+        #         if 'mat_dict' not in _sys.modules and _os.path.exists(_mat_path):
+        #             _spec = _ilu.spec_from_file_location('mat_dict', _mat_path)
+        #             _md_mod = _il.util.module_from_spec(_spec)
+        #             _spec.loader.exec_module(_md_mod)
+        #             _sys.modules['mat_dict'] = _md_mod
+        #         if 'mat_dict' in _sys.modules:
+        #             _mat_get = _sys.modules['mat_dict'].get_mat_props
+        #             # Verify the material key actually exists before committing
+        #             if _mat_get(self.wall_material, 298.15) is not None:
+        #                 _use_mat_dict = True
+        #                 print(f"[Engine] mat_dict: using '{self.wall_material}' "
+        #                       f"for Kwall, coefThermEx, youngMod")
+        #             else:
+        #                 print(f"[Engine] WARNING: wall_material '{self.wall_material}' "
+        #                       f"not found in mat_dict — using TOML scalar values.")
+        #     except Exception as _e:
+        #         print(f"[Engine] WARNING: mat_dict load failed ({_e}). "
+        #               f"Using TOML scalar values for wall properties.")
+        
         # change from mm to m for heat transfer math
         X = np.array(self.engineX) / 1000  
         Y = np.array(self.engineY) / 1000  
@@ -697,6 +761,68 @@ class Engine():
             mu  = PropsSI('V', 'T', tempArray, 'P', self.Pc, self.fuelComposition)
             Cp  = PropsSI('C', 'T', tempArray, 'P', self.Pc, self.fuelComposition)
 
+        # #
+        # #
+        # #
+        # # FIX
+        # #
+        # #
+        # #
+        # coolant_fluid = self.fuelComposition
+
+        # # ── Fluid property lookup: fluid_dict cache → CoolProp fallback ──────
+        # # fluid_dict is imported once per session (Python module cache).
+        # # For each T point: O(1) hash lookup first; only call CoolProp on a
+        # # miss, then write back so the next run is fully cache-served.
+        # try:
+        #     import os as _os, sys as _sys, importlib.util as _ilu, importlib as _il
+        #     _fd_path = _os.path.join(
+        #         _os.path.dirname(_os.path.abspath(__file__)), 'fluid_dict.py')
+        #     if 'fluid_dict' not in _sys.modules and _os.path.exists(_fd_path):
+        #         _spec = _ilu.spec_from_file_location('fluid_dict', _fd_path)
+        #         _fd_mod = _il.util.module_from_spec(_spec)
+        #         _spec.loader.exec_module(_fd_mod)
+        #         _sys.modules['fluid_dict'] = _fd_mod
+        #     _use_fluid_dict = 'fluid_dict' in _sys.modules
+        # except Exception:
+        #     _use_fluid_dict = False
+
+        # if _use_fluid_dict:
+        #     _fd        = _sys.modules['fluid_dict'].fluid_dict
+        #     _add_state = _sys.modules['fluid_dict'].add_fluid_state
+        #     _P = float(self.Pc)
+        #     rho_list, mu_list, Cp_list = [], [], []
+        #     for _T in tempArray:
+        #         _T = float(_T)
+        #         _entry = _fd.get(coolant_fluid, {}).get((_T, _P))
+        #         if _entry is not None:
+        #             rho_list.append(_entry['density_kg_m3'])
+        #             mu_list.append(_entry['dynamic_viscosity_Pa_s'])
+        #             Cp_list.append(_entry['specific_heat_J_kgK'])
+        #         else:
+        #             _rho = float(PropsSI('D', 'T', _T, 'P', _P, coolant_fluid))
+        #             _mu  = float(PropsSI('V', 'T', _T, 'P', _P, coolant_fluid))
+        #             _Cp  = float(PropsSI('C', 'T', _T, 'P', _P, coolant_fluid))
+        #             _k   = float(PropsSI('L', 'T', _T, 'P', _P, coolant_fluid))
+        #             rho_list.append(_rho); mu_list.append(_mu); Cp_list.append(_Cp)
+        #             _add_state(coolant_fluid, _T, _P, {
+        #                 'temperature_K':             _T,
+        #                 'pressure_Pa':               _P,
+        #                 'density_kg_m3':             _rho,
+        #                 'dynamic_viscosity_Pa_s':    _mu,
+        #                 'specific_heat_J_kgK':       _Cp,
+        #                 'thermal_conductivity_W_mK': _k,
+        #                 'prandtl_number':            (_mu * _Cp) / _k,
+        #                 'notes': 'Auto-populated by Engine_Class.heatTransfer()',
+        #             })
+        #     rho = np.array(rho_list)
+        #     mu  = np.array(mu_list)
+        #     Cp  = np.array(Cp_list)
+        # else:
+        #     rho = PropsSI('D', 'T', tempArray, 'P', self.Pc, coolant_fluid)
+        #     mu  = PropsSI('V', 'T', tempArray, 'P', self.Pc, coolant_fluid)
+        #     Cp  = PropsSI('C', 'T', tempArray, 'P', self.Pc, coolant_fluid)
+
         # map the temperature arrays to the specific heat, density, and viscousity
         self.CpDict  = dict(zip(tempArray, Cp))   
         self.muDict  = dict(zip(tempArray, mu))   
@@ -709,8 +835,43 @@ class Engine():
             if X[i] == 0:
                 pastThroat = True
                 
+            if i > 0:
+                self.Tw1[i] = max(self.Tw1[i - 1]-2, float(self.TCoolant[i]))
+                
 
             while (abs(self.hg[i]*(self.Tr[i]-self.Tw1[i])) - (self.hc[i]*(self.Tw2[i] - self.TCoolant[i])) > 1):
+
+                # #
+                # #
+                # #
+                # # FIX
+                # #
+                # #
+                # #
+                # # ── Per-station wall material properties ─────────────────────────
+                # # If mat_dict is active, interpolate Kwall / coefThermEx / youngMod
+                # # at the current wall temperature (Tw1[i]).  On the very first
+                # # iteration Tw1[i] is the physics-based initial guess; as the inner
+                # # while-loop converges it climbs toward the true wall temperature,
+                # # but the material properties are only re-fetched at the *station*
+                # # level (once per station), not inside the inner convergence loop.
+                # # This keeps the property lookup cost O(stations), not
+                # # O(stations × convergence_iterations).
+                # #
+                # # If mat_dict is not active, _Kwall / _CTE / _E stay equal to the
+                # # TOML scalars set during __init__ — no change to the equations.
+                # if _use_mat_dict:
+                #     _mat_props = _mat_get(self.wall_material, float(self.Tw1[i]))
+                #     if _mat_props is not None:
+                #         _Kwall   = _mat_props.get('thermal_conductivity_W_mK', self.Kwall)
+                #         _CTE     = _mat_props.get('coef_thermal_expansion_1_K', self.coefThermEx)
+                #         _E_GPa   = _mat_props.get('youngs_modulus_GPa', self.youngMod)
+                #     else:
+                #         # Tw1[i] may be outside the registered range — use scalars
+                #         _Kwall, _CTE, _E_GPa = self.Kwall, self.coefThermEx, self.youngMod
+                # else:
+                #     _Kwall, _CTE, _E_GPa = self.Kwall, self.coefThermEx, self.youngMod
+                    
                 A = np.pi*(Y[i]**2)
                 
                 # # this shit is broke and fucks everything up
@@ -764,7 +925,7 @@ class Engine():
                 self.qw[i] = (self.hg[i]*(self.Tr[i]-self.Tw1[i]))
                 
                 # use 0.45 if the oTo is not compensated for high mach numbers
-                self.qw_safer[i] = (self.qw[i]*0.66)
+                self.qw_safer[i] = (self.qw[i]*1.1)
                 
                 # temp of wall on the coolant side in order 
                 # for the combustion side to stay at temp we want
@@ -1445,11 +1606,6 @@ class Engine():
         # script_dir = Path(__file__).parent
         script_dir = os.path.dirname(os.path.abspath(__file__))
         js_script  = os.path.join(script_dir, 'generate_report.js')
-        
-        print(f"[DEBUG] script_dir : {repr(script_dir)}")
-        print(f"[DEBUG] js_script  : {repr(js_script)}")
-        print(f"[DEBUG] file exists: {os.path.exists(js_script)}")
-
         # check that the path exists
         if not os.path.exists(js_script):
             print(f"[Engine] WARNING: generate_report.js not found at {js_script}.")
