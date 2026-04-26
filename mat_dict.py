@@ -8,18 +8,6 @@
 # Second-level   : temperature in Kelvin (float)  — single state variable
 # Value          : dict of property name → float or None
 #
-# WHY CONSTANT-TIME LOOKUP
-# ------------------------
-# Both the outer (material name) and inner (temperature) lookups are Python
-# dict hash-map operations: O(1) average-case, independent of dictionary size.
-# A float key is hashable in O(1).
-#
-# NOTE ON TEMPERATURE KEYS
-# ------------------------
-# Solid properties vary only with temperature (not pressure at engineering
-# pressures), so the key is a single float T_K rather than a (T, P) tuple.
-# For nearest-temperature interpolation use get_mat_props() below.
-#
 # INCLUDED PROPERTIES
 # -------------------
 # Required (used directly in Engine_Class.heatTransfer):
@@ -198,7 +186,7 @@ def add_mat_state(material: str, T_K: float, props: dict) -> None:
 def get_mat_props(material: str, T_K: float,
                   interpolate: bool = True) -> dict | None:
     """
-    O(1) exact lookup with optional linear interpolation between registered
+    Exact lookup with optional linear interpolation between registered
     temperature points.
 
     Parameters

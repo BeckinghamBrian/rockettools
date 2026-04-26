@@ -72,16 +72,24 @@ OF_high               = 4.0
 
 # Propellant selection
 
+# if attempting to use a standard CoolProp fluid, name must match an item from list found here: https://coolprop.org/fluid_properties/PurePseudoPure.html
+# if fluid is not found on list, new fluid card must be created to calculate any heat transfer
 currFuel              = "Ethanol"    # CEA fuel name (ignored when newFuelBool = 1)
-currOx                = "O2"         # CEA oxidiser name (ignored when newOxBool = 1)
-oxCooled              = false        # true = cool with oxidiser instead of fuel
-monoMode              = 0            # 0 = biprop, 1 = monoprop
-newMonoBool           = 0            # 1 to define custom monoprop, 0 = use default (H2O2)
+
+# if attempting to use a standard CoolProp fluid, name must match an item from list found here: https://coolprop.org/fluid_properties/PurePseudoPure.html
+# if fluid is not found on list, new fluid card must be created to calculate any heat transfer
+currOx                = "O2"        # CEA oxidiser name (ignored when newOxBool = 1)
+oxCooled              = true        # true = cool with oxidiser instead of fuel
+monoMode              = 0           # 0 = biprop, 1 = monoprop
+newMonoBool           = 0           # 1 to define custom monoprop, 0 = use default (H2O2)
 newMonoName           = "MyMono"
 newFuelBool           = 1           # 1 to define custom fuel, 0 = use rocketcea fuel
 newFuelName           = "75_ETH"
 newOxBool             = 0           # 1 to define custom ox, 0 = use rocketcea ox
 newOxName             = "GelN2O4"
+
+oxTankTemp            = 90          # ox temp in K within the tank
+fuTankTemp            = 300         # fu temp in K within the tank
 
 # Each sub-array: [CEA_component_name, elemental_composition, wt_percent]
 # Weights must sum to 100.
@@ -94,6 +102,8 @@ newFuel               = [
 ]
 
 # Each sub-array: [CEA_name, elemental_composition, wt_percent]
+# Note that coolprop is quite limited with information about many oxidizers
+# and mixtures are not easily supported for retrieving fluid properties for ox regen cooling
 newOx                 = [
     ["N2O4(L)", "N 2 O 4",  "96.5"],
     ["SiO2",    "Si 1 O 2", "3.5" ],
@@ -101,7 +111,7 @@ newOx                 = [
 
 # regen cooling param
 
-coolantTempStart      = 300.0        # Coolant inlet temp (K)
+#coolantTempStart      = 300.0        # Coolant inlet temp (K)
 Kwall                 = 12.0         # Wall thermal conductivity  W/(m·K)  — Inconel 718 ≈ 12
 Kc                    = 0.17         # Coolant thermal conductivity  W/(m·K) — ethanol ≈ 0.17
 chamberWallThickness  = 1.5          # Chamber wall thickness (mm)

@@ -24,7 +24,8 @@
  *    Two-column table: Parameter | Value
  *  ─────────────────────────────────
  *  SECTION 3 · PLOTS
- *    Two plots per page, each 9 × 4 in (fits US Letter with 1-in margins).
+ *    Two plots per page. Images are 9 × 3.125 in with zero paragraph line
+ *    height so both images fit inside the 6.5 in landscape content height.
  */
 
 'use strict';
@@ -57,12 +58,26 @@ const LAND_CONTENT_W = PAGE_H - 2 * MARGIN;   // 12960 DXA  = 9 in
 // Content height on landscape page = short edge − 2 margins = 12240 − 2880 = 9360 DXA
 const LAND_CONTENT_H = PAGE_W - 2 * MARGIN;   // 9360 DXA  = 6.5 in
 
-// Image dimensions for landscape pages: fill the full landscape content width.
-// Each plot PNG was saved at 9 × 4 in by Python.  On landscape we have 9 in
-// of width, so we keep width the same and the aspect ratio handles height.
-// At 96 dpi: 9 in = 864 px wide, 4 in = 384 px tall — fills half the page.
+// ── Image dimensions ────────────────────────────────────────────────────────
+// Landscape content area: 8.5 in page − 2×1 in margins = 6.5 in tall, 9 in wide.
+// Two images must share 6.5 in.  The hidden cost is the implicit paragraph
+// line height Word adds to every paragraph (10–12 pt, ~0.14 in) even when the
+// paragraph contains only an image.  With 2 image paragraphs + 1 spacer = 3
+// paragraphs, that is ~0.42 in of invisible overhead that causes overflow.
+//
+// FIX: set spacing: { line: 1, lineRule: 'exact' } on all image and spacer
+// paragraphs.  lineRule 'exact' forces Word to use exactly 1 DXA (~0 in)
+// as the line height, eliminating the implicit overhead entirely.
+//
+// With zero line overhead the math is:
+//   6.5 in − 40 DXA spacer (0.028 in) = 6.472 in for 2 images
+//   6.472 / 2 = 3.236 in max per image
+//   300 px ÷ 96 dpi = 3.125 in → 0.22 in of safe headroom
+//
+// IMG_W_PX: 864 px = 9.0 in @ 96 dpi  (unchanged)
+// IMG_H_PX: 300 px = 3.125 in @ 96 dpi  (changed from 384 = 4 in)
 const IMG_W_PX = 864;   // plot image width in docx pixel units (9 in equivalent)
-const IMG_H_PX = 384;   // plot image height in docx pixel units (4 in equivalent)
+const IMG_H_PX = 300;   // plot image height in docx pixel units (3.125 in equivalent)
 
 // ── Utility builders ──────────────────────────────────────────────────────────
 
@@ -229,8 +244,8 @@ const INPUT_LABELS = {
   OF_low:                'OF Sweep — Low',
   OF_high:               'OF Sweep — High',
   currFuel:              'Fuel (CEA name)',
-  currOx:                'Oxidiser (CEA name)',
-  oxCooled:              'Oxidiser-Cooled?',
+  currOx:                'Oxidizer (CEA name)',
+  oxCooled:              'Oxidizer-Cooled?',
   coolantTempStart:      'Coolant Inlet Temp (K)',
   Kwall:                 'Wall Thermal Conductivity (W/m·K)',
   Kc:                    'Coolant Thermal Conductivity (W/m·K)',
@@ -246,8 +261,8 @@ const INPUT_LABELS = {
   newMonoName:           'Custom Monoprop Name',
   newFuelBool:           'Custom Fuel Enabled',
   newFuelName:           'Custom Fuel Name',
-  newOxBool:             'Custom Oxidiser Enabled',
-  newOxName:             'Custom Oxidiser Name',
+  newOxBool:             'Custom Oxidizer Enabled',
+  newOxName:             'Custom Oxidizer Name',
   report_output_dir:     'Report Output Directory',
   report_dpi:            'Plot DPI',
   plot_engine_contour:   'Plot — Engine Contour',
@@ -280,17 +295,17 @@ const CHAMBER_LABELS = {
   Ueq_m_s:       'Exit Velocity, Ueq (m/s)',
   mdot_kg_s:     'Total Mass Flow Rate (kg/s)',
   mdotFuel_kg_s: 'Fuel Mass Flow Rate (kg/s)',
-  mdotOx_kg_s:   'Oxidiser Mass Flow Rate (kg/s)',
+  mdotOx_kg_s:   'Oxidizer Mass Flow Rate (kg/s)',
   Isp_s:         'Specific Impulse, Isp (s)',
   cea_Isp_s:     'CEA Specific Impulse (s)',
   Cstar_m_s:     'Characteristic Velocity, C* (m/s)',
   cp_J_kgK:      'Specific Heat, Cp (J/kg·K)',
   VdotFuel_L_s:  'Fuel Volume Flow Rate (L/s)',
-  VdotOx_L_s:    'Oxidiser Volume Flow Rate (L/s)',
+  VdotOx_L_s:    'Oxidizer Volume Flow Rate (L/s)',
   volFuel_L:     'Fuel Tank Volume Required (L)',
-  volOx_L:       'Oxidiser Tank Volume Required (L)',
+  volOx_L:       'Oxidizer Tank Volume Required (L)',
   massFuel_kg:   'Fuel Mass (kg)',
-  massOx_kg:     'Oxidiser Mass (kg)',
+  massOx_kg:     'Oxidizer Mass (kg)',
   massProp_kg:   'Total Propellant Mass (kg)',
   Vc_m3:         'Chamber Volume (m³)',
   Lc_m:          'Chamber Length (m)',
@@ -424,7 +439,7 @@ async function main() {
   // Add a heading for Section 3 at the end of the portrait section.
   // If there are no plots, include a note here instead of making a landscape section.
   children.push(pageBreak());
-  children.push(heading('3  ·  Plots', 32, 60));
+  // children.push(heading('3  ·  Plots', 32, 0));
 
   if (plots.length === 0) {
     children.push(spacer(120));
@@ -459,13 +474,15 @@ async function main() {
 
     pair.forEach((plot, localIdx) => {
       // Small spacer before the second plot on the same page
-      if (localIdx === 1) pairChildren.push(spacer(200));
-
-      pairChildren.push(heading(plot.title, 24, localIdx === 0 ? 60 : 60));
-
+      if (localIdx === 1) {
+        pairChildren.push(new Paragraph({
+          spacing: { before: 40, after: 0, line: 1, lineRule: 'exact' },
+          children: [],
+        }));
+      }
       const imgData = fs.readFileSync(plot.path);
       pairChildren.push(new Paragraph({
-        spacing: { before: 40, after: 40 },
+        spacing: { before: 0, after: 0 },
         children: [new ImageRun({
           type: 'png',
           data: imgData,

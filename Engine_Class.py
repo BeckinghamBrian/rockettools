@@ -81,7 +81,6 @@ class Engine():
         self.alpha                = 30
         self.beta                 = 15
 
-        self.coolantTempStart     = 300
         self.Kwall                = 0
         self.Kc                   = 0
         self.chamberWallThickness = 0
@@ -96,6 +95,13 @@ class Engine():
         self.currOx               = 'O2'
         self.currMono             = 'H2O2'
         self.oxCooled             = False
+        self.oxTankTemp           = 90 # K
+        self.fuTankTemp           = 300 # K
+        
+        if self.oxCooled:
+            self.coolantTempStart = self.oxTankTemp
+        else:
+            self.coolantTempStart = self.fuTankTemp
 
         # OF sweep bounds for plotIspVOF (overrideable)
         self.OF_low               = 1.0
@@ -203,6 +209,7 @@ class Engine():
             'newFuelBool', 'newFuelName', 'newFuel',
             'newOxBool', 'newOxName', 'newOx',
             'monoMode', 'newMonoBool', 'newMonoName', 'newMono',
+            'oxTankTemp', 'fuTankTemp',
             # OF sweep
             'OF_low', 'OF_high',
             # plot selection flags
@@ -221,6 +228,11 @@ class Engine():
                 setattr(self, key, value)
             else:
                 print(f"[Engine] WARNING: unknown input key '{key}' ignored.")
+                
+        if self.oxCooled:
+            self.coolantTempStart = self.oxTankTemp
+        else:
+            self.coolantTempStart = self.fuTankTemp
 
     def getCeaProperties(self):
         
@@ -394,53 +406,82 @@ class Engine():
         if self.monoMode == 1:
             raise Exception('PROPELLANT RATES NOT AVAILABLE IN MONOPROP MODE\nSET ''monoMode = 0'' AND USE BI PROPELLANT MODE')
         
-        if len(self.newFuel) == 2:
+        if self.newFuelBool:
+            if len(self.newFuel) == 2:
+            
+                # still needed for CoolProp
+                fuel_comp_2 = float(self.newFuel[1][2]) / 100
+                fuel_card_comp_1 = self.newFuel[0][1]
+                fuel_card_comp_1.replace(' ', '')
+                fuel_card_comp_1 = Formula(fuel_card_comp_1)
+                fuel_comp_1_MM = fuel_card_comp_1.mass
+                fuel_card_comp_2 = self.newFuel[1][1]
+                fuel_card_comp_2.replace(' ', '')
+                fuel_card_comp_2 = Formula(fuel_card_comp_2)
+                fuel_comp_2_MM = fuel_card_comp_2.mass
         
-            # still needed for CoolProp
-            # fuel_comp_1 = float(self.newFuel[0][2]) / 100 # fraction of 1
-            fuel_comp_2 = float(self.newFuel[1][2]) / 100
-            comp_1 = self.newFuel[0][1]
-            comp_1.replace(' ', '')
-            comp_1 = Formula(comp_1)
-            fuel_comp_1_MM = comp_1.mass
-            comp_2 = self.newFuel[1][1]
-            comp_2.replace(' ', '')
-            comp_2 = Formula(comp_2)
-            fuel_comp_2_MM = comp_2.mass
-            # waterMM = 18.02 # g/mol
-            # ethanolMM = 46.07 # g/mol
-    
-            # find values for CoolProp in heat transfer calcs
-            fuel_comp_1_frac = round(((1-fuel_comp_2) * fuel_comp_1_MM) / (((1-fuel_comp_2) * fuel_comp_1_MM) + (fuel_comp_2 * fuel_comp_2_MM)),4)
-            fuel_comp_2_frac = round(1 - fuel_comp_1_frac, 4)
-            # remove the 0 before the decimal for CoolProp
-            fuel_comp_1_frac = str(fuel_comp_1_frac)[1:]
-            fuel_comp_2_frac = str(fuel_comp_2_frac)[1:]
-    
-            self.fuelComposition = self.newFuel[0][3]+'['+fuel_comp_1_frac+']&'+self.newFuel[1][3]+'['+fuel_comp_2_frac+']'
-            
-        else:
-            
-            self.fuelComposition = self.newFuel[0][3]
+                # find values for CoolProp in heat transfer calcs
+                fuel_comp_1_frac = round(((1-fuel_comp_2) * fuel_comp_1_MM) / 
+                                        (((1-fuel_comp_2) * fuel_comp_1_MM) + (fuel_comp_2 * fuel_comp_2_MM)),4)
+                fuel_comp_2_frac = round(1 - fuel_comp_1_frac, 4)
+                # remove the 0 before the decimal for CoolProp
+                fuel_comp_1_frac = str(fuel_comp_1_frac)[1:]
+                fuel_comp_2_frac = str(fuel_comp_2_frac)[1:]
         
-        if (self.currOx != 'O2'):
-            print("Ox cooling only available for liquid oxygen")
-            
+                self.fuelComposition = self.newFuel[0][3]+'['+fuel_comp_1_frac+']&'+self.newFuel[1][3]+'['+fuel_comp_2_frac+']'
+                
+            else:
+                
+                self.fuelComposition = self.newFuel[0][3]
+                
         else:
-            self.oxComposition = 'Oxygen'
+            self.fuelComposition = self.currFuel
+        
+        if self.newOxBool:
+            raise ValueError('CREATING NEW OXIDIZER MIXTURES IS NOT YET SUPPORTED FOR VOLUME OR REGEN CALCULATIONS.'+
+                             'COOLPROP IS RATHER LIMITING, ROCKETPROPS WILL BE USED IN THE FUTURE TO ADD THIS FEATURE.')
+            if len(self.newOx) == 2:
+            
+                # still needed for CoolProp
+                ox_comp_2 = float(self.newOx[1][2]) / 100
+                ox_card_comp_1 = self.newOx[0][1]
+                ox_card_comp_1.replace(' ', '')
+                ox_card_comp_1 = Formula(ox_card_comp_1)
+                ox_comp_1_MM = ox_card_comp_1.mass
+                ox_card_comp_2 = self.newOx[1][1]
+                ox_card_comp_2.replace(' ', '')
+                ox_card_comp_2 = Formula(ox_card_comp_2)
+                ox_comp_2_MM = ox_card_comp_2.mass
+        
+                # find values for CoolProp in heat transfer calcs
+                ox_comp_1_frac = round(((1-ox_comp_2) * ox_comp_1_MM) / 
+                                        (((1-ox_comp_2) * ox_comp_1_MM) + (ox_comp_2 * ox_comp_2_MM)),4)
+                ox_comp_2_frac = round(1 - ox_comp_1_frac, 4)
+                # remove the 0 before the decimal for CoolProp
+                ox_comp_1_frac = str(ox_comp_1_frac)[1:]
+                ox_comp_2_frac = str(ox_comp_2_frac)[1:]
+        
+                self.oxComposition = self.newOx[0][3]+'['+ox_comp_1_frac+']&'+self.newOx[1][3]+'['+ox_comp_2_frac+']'
+                
+            else:
+                
+                self.oxComposition = self.newOx[0][3]
+                
+        else:
+            self.oxComposition = self.currOx
             
         # density and volume/sec calcs from tanks
-        self.rhoLOX = 1141 # kg/m3
-        self.rhoFuel = PropsSI('D', 'T', 300, 'P', 101325, self.fuelComposition) # kg/m3
+        self.rhoOX = PropsSI('D', 'T', self.oxTankTemp, 'P', 101325, self.oxComposition) # kg/m3
+        self.rhoFuel = PropsSI('D', 'T', self.fuTankTemp, 'P', 101325, self.fuelComposition) # kg/m3
 
-        self.VdotLOX = (self.mdotOx / self.rhoLOX) * 1000 # L/s
+        self.VdotOX = (self.mdotOx / self.rhoOX) * 1000 # L/s
         self.VdotFuel = (self.mdotFuel / self.rhoFuel) * 1000 # L/s
 
         self.volumeFuel = self.VdotFuel * self.burnTime # L
-        self.volumeLOX = self.VdotLOX * self.burnTime # L
+        self.volumeOX = self.VdotOX * self.burnTime # L
         self.massFuel = self.volumeFuel * self.rhoFuel / 1000 # kg
-        self.massLOX = self.volumeLOX * self.rhoLOX / 1000 # kg
-        self.massProp = self.massFuel + self.massLOX
+        self.massOX = self.volumeOX * self.rhoOX / 1000 # kg
+        self.massProp = self.massFuel + self.massOX
         
     def printChamberInfo(self):
         
@@ -490,8 +531,15 @@ class Engine():
         print("cea_Isp: ",round(self.cea_Isp,2))
         
     def engineContour(self):
-    # given the geometry of the engine this will return the profile of the engine
-    # as well as plot the profile. Nozzle geometry is found using Method of Characteristics
+        
+        """Given the geometry of the engine this will return the profile of the engine
+        as well as plot the profile. Nozzle geometry is found using Method of Characteristics
+
+        Returns:
+            list[float]: returns three lists that ccan be imported into CAD
+            to create splines of the engine contour
+        """
+
     # startChamber is negative dist from throat that the chamber starts in mm
     # endChamber is neg dist from throat that the chamber ends in mm
     # endRc1 is neg dist from throat that first conv curve ends in mm
@@ -564,6 +612,14 @@ class Engine():
         self.nozZContour = np.zeros(len(self.nozXContour)).tolist()
         
     def saveNozGeo(self, filePath):
+        
+        """Given the geometry of the nozzle this will return the profile of the engine
+        as well as plot the profile. Nozzle geometry is found using Method of Characteristics
+
+        Returns:
+            list[float]: returns three lists that ccan be imported into CAD
+            to create splines of the nozzle contour
+        """
     # saves nozzle geometry in a txt file that can be imported into CAD 
     # software to model the engine
         
@@ -580,6 +636,11 @@ class Engine():
         df.to_csv(filename, sep=' ', index = False, header=False)
         
     def saveChamberGeo(self, filePath):
+        """Takes a file path and saves the chamber geometry to that path.
+
+        Args:
+            filePath (str): path to where the geometry will be saved
+        """
     # saves nozzle geometry in a txt file that can be imported into CAD 
     # software to model the engine
         
@@ -598,6 +659,19 @@ class Engine():
         df.to_csv(filename, sep=' ', index = False, header=False)
         
     def heatTransfer(self):
+        """Iteratively solves for wall and coolant temperatures at each step along
+        the chamber.
+
+        Raises:
+            ValueError: INPUT VALUE FOR coolandTempStart THIS IS THE TEMPERATURE (K) OF THE FUEL IN THE TANK
+            ValueError: INPUT VALUE FOR Kwall THIS IS THE THERMAL CONDUCTIVITY (W/m*K) OF THE CHAMBER WALL
+            ValueError: INPUT VALUE FOR Kc THIS IS THE THERMAL CONDUCTIVITY (W/m*K) OF THE FUEL
+            ValueError: INPUT VALUE FOR chamberWallThickness THIS IS THE THICKNESS (mm) OF THE CHAMBER WALL
+            ValueError: INPUT VALUE FOR channelHeight THIS IS THE DEPTH (mm) OF THE COOLING CHANNELS
+            ValueError: INPUT VALUE FOR channelWallThickness THIS IS THE WALL THICKNESS (mm) BETWEEN COOLING CHANNELS
+            ValueError: INPUT VALUE FOR numChannels THIS IS THE NUMBER OF COOLING CHANNELS AROUND THE CHAMBER
+            Exception: REGEN COOLING NOT AVAILABLE IN MONOPROP MODE, SET ''monoMode = 0'' AND USE BI PROPELLANT MODE
+        """
         
         if self.coolantTempStart == 0:
             raise ValueError('INPUT VALUE FOR coolandTempStart THIS IS THE TEMPERATURE (K) OF THE FUEL IN THE TANK')
@@ -613,6 +687,8 @@ class Engine():
             raise ValueError('INPUT VALUE FOR channelWallThickness THIS IS THE WALL THICKNESS (mm) BETWEEN COOLING CHANNELS')
         if self.numChannels == 0:
             raise ValueError('INPUT VALUE FOR numChannels THIS IS THE NUMBER OF COOLING CHANNELS AROUND THE CHAMBER')
+        if self.oxCooled and self.oxComposition != "O2":
+            raise ValueError('OX REGEN COOLING ONLY SUPPORTED WITH OXYGEN ("O2" MUST BE USED FOR CEA)')
 
         self.engineContour()
         
@@ -744,84 +820,64 @@ class Engine():
         tempRho = 0
         tempArray = np.round(np.arange(self.coolantTempStart, 500, self.temp_step),2)
 
-        if self.currOx == 'O2' and self.oxCooled:
-            # ethanol and water by mole fractions, change this to not be hard coded
-            rho = PropsSI('D', 'T', tempArray, 'P', self.Pc, self.fuelComposition)
-            mu  = PropsSI('V', 'T', tempArray, 'P', self.Pc, self.fuelComposition)
-            Cp  = PropsSI('C', 'T', tempArray, 'P', self.Pc, self.fuelComposition)
-            print(rho)
-            print(mu)
-            print(Cp)
-        elif self.currOx != 'O2' and self.oxCooled:
-            print("ONLY ABLE TO COOL WITH LIQUID OXYGEN")
-            return
-        elif not self.oxCooled:
-            # ethanol and water by mole fractions, change this to not be hard coded
-            rho = PropsSI('D', 'T', tempArray, 'P', self.Pc, self.fuelComposition)
-            mu  = PropsSI('V', 'T', tempArray, 'P', self.Pc, self.fuelComposition)
-            Cp  = PropsSI('C', 'T', tempArray, 'P', self.Pc, self.fuelComposition)
+        # if ox cooled, use ox properties
+        if self.oxCooled:
+            coolant_fluid = self.oxComposition
+        else:
+            coolant_fluid = self.fuelComposition
 
-        # #
-        # #
-        # #
-        # # FIX
-        # #
-        # #
-        # #
-        # coolant_fluid = self.fuelComposition
+        # ── Fluid property lookup: fluid_dict cache → CoolProp fallback ──────
+        # fluid_dict is imported once per session (Python module cache).
+        # For each T point: O(1) hash lookup first; only call CoolProp on a
+        # miss, then write back so the next run is fully cache-served.
+        try:
+            import os as _os, sys as _sys, importlib.util as _ilu, importlib as _il
+            _fd_path = _os.path.join(
+                _os.path.dirname(_os.path.abspath(__file__)), 'fluid_dict.py')
+            if 'fluid_dict' not in _sys.modules and _os.path.exists(_fd_path):
+                _spec = _ilu.spec_from_file_location('fluid_dict', _fd_path)
+                _fd_mod = _il.util.module_from_spec(_spec)
+                _spec.loader.exec_module(_fd_mod)
+                _sys.modules['fluid_dict'] = _fd_mod
+            _use_fluid_dict = 'fluid_dict' in _sys.modules
+        except Exception:
+            _use_fluid_dict = False
 
-        # # ── Fluid property lookup: fluid_dict cache → CoolProp fallback ──────
-        # # fluid_dict is imported once per session (Python module cache).
-        # # For each T point: O(1) hash lookup first; only call CoolProp on a
-        # # miss, then write back so the next run is fully cache-served.
-        # try:
-        #     import os as _os, sys as _sys, importlib.util as _ilu, importlib as _il
-        #     _fd_path = _os.path.join(
-        #         _os.path.dirname(_os.path.abspath(__file__)), 'fluid_dict.py')
-        #     if 'fluid_dict' not in _sys.modules and _os.path.exists(_fd_path):
-        #         _spec = _ilu.spec_from_file_location('fluid_dict', _fd_path)
-        #         _fd_mod = _il.util.module_from_spec(_spec)
-        #         _spec.loader.exec_module(_fd_mod)
-        #         _sys.modules['fluid_dict'] = _fd_mod
-        #     _use_fluid_dict = 'fluid_dict' in _sys.modules
-        # except Exception:
-        #     _use_fluid_dict = False
-
-        # if _use_fluid_dict:
-        #     _fd        = _sys.modules['fluid_dict'].fluid_dict
-        #     _add_state = _sys.modules['fluid_dict'].add_fluid_state
-        #     _P = float(self.Pc)
-        #     rho_list, mu_list, Cp_list = [], [], []
-        #     for _T in tempArray:
-        #         _T = float(_T)
-        #         _entry = _fd.get(coolant_fluid, {}).get((_T, _P))
-        #         if _entry is not None:
-        #             rho_list.append(_entry['density_kg_m3'])
-        #             mu_list.append(_entry['dynamic_viscosity_Pa_s'])
-        #             Cp_list.append(_entry['specific_heat_J_kgK'])
-        #         else:
-        #             _rho = float(PropsSI('D', 'T', _T, 'P', _P, coolant_fluid))
-        #             _mu  = float(PropsSI('V', 'T', _T, 'P', _P, coolant_fluid))
-        #             _Cp  = float(PropsSI('C', 'T', _T, 'P', _P, coolant_fluid))
-        #             _k   = float(PropsSI('L', 'T', _T, 'P', _P, coolant_fluid))
-        #             rho_list.append(_rho); mu_list.append(_mu); Cp_list.append(_Cp)
-        #             _add_state(coolant_fluid, _T, _P, {
-        #                 'temperature_K':             _T,
-        #                 'pressure_Pa':               _P,
-        #                 'density_kg_m3':             _rho,
-        #                 'dynamic_viscosity_Pa_s':    _mu,
-        #                 'specific_heat_J_kgK':       _Cp,
-        #                 'thermal_conductivity_W_mK': _k,
-        #                 'prandtl_number':            (_mu * _Cp) / _k,
-        #                 'notes': 'Auto-populated by Engine_Class.heatTransfer()',
-        #             })
-        #     rho = np.array(rho_list)
-        #     mu  = np.array(mu_list)
-        #     Cp  = np.array(Cp_list)
-        # else:
-        #     rho = PropsSI('D', 'T', tempArray, 'P', self.Pc, coolant_fluid)
-        #     mu  = PropsSI('V', 'T', tempArray, 'P', self.Pc, coolant_fluid)
-        #     Cp  = PropsSI('C', 'T', tempArray, 'P', self.Pc, coolant_fluid)
+        if _use_fluid_dict:
+            _fd        = _sys.modules['fluid_dict'].fluid_dict
+            _add_state = _sys.modules['fluid_dict'].add_fluid_state
+            _P = float(self.Pc)
+            rho_list, mu_list, Cp_list = [], [], []
+            for _T in tempArray:
+                _T = float(_T)
+                _entry = _fd.get(coolant_fluid, {}).get((_T, _P))
+                if _entry is not None:
+                    rho_list.append(_entry['density_kg_m3'])
+                    mu_list.append(_entry['dynamic_viscosity_Pa_s'])
+                    Cp_list.append(_entry['specific_heat_J_kgK'])
+                else:
+                    _rho = float(PropsSI('D', 'T', _T, 'P', _P, coolant_fluid))
+                    _mu  = float(PropsSI('V', 'T', _T, 'P', _P, coolant_fluid))
+                    _Cp  = float(PropsSI('C', 'T', _T, 'P', _P, coolant_fluid))
+                    _k   = float(PropsSI('L', 'T', _T, 'P', _P, coolant_fluid))
+                    rho_list.append(_rho); mu_list.append(_mu); Cp_list.append(_Cp)
+                    _add_state(coolant_fluid, _T, _P, {
+                        'temperature_K':             _T,
+                        'pressure_Pa':               _P,
+                        'density_kg_m3':             _rho,
+                        'dynamic_viscosity_Pa_s':    _mu,
+                        'specific_heat_J_kgK':       _Cp,
+                        'thermal_conductivity_W_mK': _k,
+                        'prandtl_number':            (_mu * _Cp) / _k,
+                        'notes': 'Auto-populated by Engine_Class.heatTransfer()',
+                    })
+            rho = np.array(rho_list)
+            mu  = np.array(mu_list)
+            Cp  = np.array(Cp_list)
+        else:
+            rho = PropsSI('D', 'T', tempArray, 'P', self.Pc, coolant_fluid)
+            mu  = PropsSI('V', 'T', tempArray, 'P', self.Pc, coolant_fluid)
+            Cp  = PropsSI('C', 'T', tempArray, 'P', self.Pc, coolant_fluid)
 
         # map the temperature arrays to the specific heat, density, and viscousity
         self.CpDict  = dict(zip(tempArray, Cp))   
@@ -1370,17 +1426,13 @@ class Engine():
         os.makedirs(out_dir, exist_ok=True)
         dpi = self.report_dpi
 
-        # run analyses
-        self.getCeaProperties()
-        self.engineDimensions()
-        if not self.monoMode:
-            self.propFlowRates()
-            self.heatTransfer()
-
-        # save plots as pngs 9" x 4"
-        FIG_W, FIG_H = 9.0, 4.0
+        # FIG_H 4.0 → 3.125 (= 300 px ÷ 96 dpi) to match IMG_H_PX = 300 in JS.
+        # The PNG physical size must equal the docx image slot so Word renders
+        # at native resolution with no scaling.  3.125 in × 2 plots = 6.25 in,
+        # leaving 0.25 in of headroom inside the 6.5 in landscape content area.
+        FIG_W, FIG_H = 9.0, 3.125
         saved_plots = []   # [{title, path}, …] consumed by JS builder
-
+        
         def _save(flag, title, plot_fn):
             if not flag:
                 return
@@ -1393,6 +1445,10 @@ class Engine():
             plt.close(fig)
             saved_plots.append({'title': title, 'path': os.path.abspath(fname)})
 
+
+        # run analyses
+        self.engineContour()
+        
         _save(self.plot_engine_contour, 'Engine Contour', lambda fig, ax: (
             ax.plot(self.engineX, self.engineY),
             ax.set_aspect(1.0),
@@ -1411,7 +1467,9 @@ class Engine():
             ax.set_ylabel('Radius (mm)'),
         ))
 
-        if not self.monoMode:
+        if not self.monoMode and not self.newOxBool:
+            self.propFlowRates()
+            self.heatTransfer()
             if self.plot_isp_vs_of:
                 fig, ax = plt.subplots(figsize=(FIG_W, FIG_H), dpi=dpi)
                 for e in [self.eps - 5, self.eps, self.eps + 5]:
@@ -1573,17 +1631,17 @@ class Engine():
             'Rt_mm':         round(self.Rt  * 1000, 4),
             'Rc3_mm':        round(self.Rc3 * 1000, 4),
             'Re_mm':         round(self.Re  * 1000, 4),
+            'mdotFuel_kg_s':  round(self.mdotFuel, 3),
+            'mdotOx_kg_s':    round(self.mdotOx, 3),
         }
-        if not self.monoMode:
+        if not self.monoMode and not self.newOxBool:
             chamber.update({
-                'mdotFuel_kg_s':  round(self.mdotFuel, 3),
-                'mdotOx_kg_s':    round(self.mdotOx, 3),
                 'VdotFuel_L_s':   round(self.VdotFuel, 4),
-                'VdotOx_L_s':     round(self.VdotLOX, 4),
+                'VdotOx_L_s':     round(self.VdotOX, 4),
                 'volFuel_L':      round(self.volumeFuel, 2),
-                'volOx_L':        round(self.volumeLOX, 2),
+                'volOx_L':        round(self.volumeOX, 2),
                 'massFuel_kg':    round(self.massFuel, 2),
-                'massOx_kg':      round(self.massLOX, 2),
+                'massOx_kg':      round(self.massOX, 2),
                 'massProp_kg':    round(self.massProp, 2),
             })
 

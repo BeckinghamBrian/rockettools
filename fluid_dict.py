@@ -8,19 +8,11 @@
 # Second-level   : (T_K, P_Pa) tuple  — exact state point
 # Value          : dict of CoolProp property name → float
 #
-# WHY CONSTANT-TIME LOOKUP
-# ------------------------
-# Python dicts are hash maps. Both the outer lookup (fluid name string) and
-# the inner lookup ((T, P) tuple) are O(1) average-case hash operations.
-# A (float, float) tuple is hashable and its hash is computed in O(1).
-# There is NO iteration over entries at lookup time; the runtime cost is
-# independent of how many fluids or state points are stored.
-#
 # USAGE
 # -----
 #   from fluid_dict import fluid_dict
 #
-#   # Direct lookup — O(1)
+#   # Direct lookup
 #   props = fluid_dict["Ethanol[.75]&Water[.25]"][(353.15, 101325.0)]
 #   rho   = props["density_kg_m3"]
 #   k     = props["thermal_conductivity_W_mK"]
