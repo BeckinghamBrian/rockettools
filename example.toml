@@ -78,7 +78,7 @@ currFuel              = "Ethanol"    # CEA fuel name (ignored when newFuelBool =
 
 # if attempting to use a standard CoolProp fluid, name must match an item from list found here: https://coolprop.org/fluid_properties/PurePseudoPure.html
 # if fluid is not found on list, new fluid card must be created to calculate any heat transfer
-currOx                = "O2"        # CEA oxidiser name (ignored when newOxBool = 1)
+currOx                = "H2O2"        # CEA oxidiser name (ignored when newOxBool = 1)
 oxCooled              = true        # true = cool with oxidiser instead of fuel
 monoMode              = 0           # 0 = biprop, 1 = monoprop
 newMonoBool           = 0           # 1 to define custom monoprop, 0 = use default (H2O2)
@@ -88,7 +88,7 @@ newFuelName           = "75_ETH"
 newOxBool             = 0           # 1 to define custom ox, 0 = use rocketcea ox
 newOxName             = "GelN2O4"
 
-oxTankTemp            = 90          # ox temp in K within the tank
+oxTankTemp            = 325          # ox temp in K within the tank
 fuTankTemp            = 300         # fu temp in K within the tank
 
 # Each sub-array: [CEA_component_name, elemental_composition, wt_percent]
