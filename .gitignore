@@ -37,6 +37,7 @@ MANIFEST
 
 # output files
 output/
+*./output/
 
 # Unit test / coverage reports
 htmlcov/

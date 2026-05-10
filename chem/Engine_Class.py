@@ -35,7 +35,6 @@ Output:
 """
 
 from rocketcea.cea_obj import CEA_Obj, add_new_fuel, add_new_oxidizer, add_new_propellant
-from CoolProp.CoolProp import PropsSI
 import matplotlib.pyplot as plt
 import MOC_nozzle as MOC
 import pandas as pd
@@ -44,22 +43,26 @@ from os import path
 import numpy as np
 from molmass import Formula
 
-# fluid_names provides canonical ↔ CEA/CoolProp/RocketProps name translation
-# and a unified get_props() dispatcher (fluid_dict → rocketprops → CoolProp).
-try:
-    import importlib.util as _ilu, os as _fno
-    _fn_path = _fno.path.join(_fno.path.dirname(_fno.path.abspath(__file__)), 'fluid_names.py')
-    if _fn_path:
-        _fn_spec = _ilu.spec_from_file_location('fluid_names', _fn_path)
-        _fn_mod  = _ilu.module_from_spec(_fn_spec)
-        _fn_spec.loader.exec_module(_fn_mod)
-        import sys as _fns; _fns.modules['fluid_names'] = _fn_mod
-        from fluid_names import translate, canonical, get_props as _get_fluid_props
-        _HAS_FLUID_NAMES = True
-except Exception as _fn_err:
-    _HAS_FLUID_NAMES = False
-    def translate(name, target): return name
-    def canonical(name): return name
+# fluid_names is the single gateway for ALL fluid property lookups.
+# Engine_Class never calls CoolProp, rocketprops, or fluid_dict directly.
+# All three backends are accessed exclusively through fluid_names.get_props().
+import importlib.util as _ilu, os as _fno, sys as _fns
+_fn_path = _fno.path.join(_fno.path.dirname(_fno.path.abspath(__file__)), 'fluid_names.py')
+_fn_spec = _ilu.spec_from_file_location('fluid_names', _fn_path)
+_fn_mod  = _ilu.module_from_spec(_fn_spec)
+_fn_spec.loader.exec_module(_fn_mod)
+_fns.modules['fluid_names'] = _fn_mod
+
+from fluid_names import (
+    translate,                  # any name → CEA / CoolProp / RocketProps string
+    canonical,                  # resolve alias to canonical name
+    get_props,                  # unified property dispatcher (fluid_dict→RP→CoolProp)
+    get_density,                # convenience: density (kg/m³) only
+    get_specific_heat,          # convenience: Cp (J/kg·K) only
+    get_viscosity,              # convenience: dynamic viscosity (Pa·s) only
+    get_thermal_conductivity,   # convenience: thermal conductivity (W/m·K) only
+    get_prandtl,                # convenience: Prandtl number only
+)
 
 class Engine():
 
@@ -313,19 +316,23 @@ class Engine():
         # if new oxidizer was created, use that for CEA
         if self.newOxBool:
             add_new_oxidizer(self.newOxName, self.newOxCard)
-            self.currOx=self.newOxName
+            self.currOx = self.newOxName
         else:
-            # translate currOx from any naming convention to the CEA name
+            # translate currOx from any naming convention to the CEA name.
             # e.g. "Oxygen" → "O2", "LOX" → "O2", "N2O4" → "N2O4(L)"
+            # TODO if the oxidizer is a mixture (eg FLOX) create and call a 
+            # function that creates a cea card to fetch performance properties for
             self.currOx = translate(self.currOx, 'cea')
 
         # if new fuel was created, use that for CEA
         if self.newFuelBool:
             add_new_fuel(self.newFuelName, self.newFuelCard)
-            self.currFuel=self.newFuelName
+            self.currFuel = self.newFuelName
         else:
-            # translate currFuel from any naming convention to the CEA name
+            # translate currFuel from any naming convention to the CEA name.
             # e.g. "Ethanol" → "C2H5OH(L)", "Methane" → "CH4(L)"
+            # TODO if the oxidizer is a mixture (eg FLOX) create and call a 
+            # function that creates a cea card to fetch performance properties for
             self.currFuel = translate(self.currFuel, 'cea')
 
         self.rocketcea_eng_obj = CEA_Obj(oxName=self.currOx, fuelName=self.currFuel)
@@ -458,11 +465,15 @@ class Engine():
             else:
                 
                 self.fuelComposition = self.newFuel[0][3]
-                
+
         else:
-            self.fuelComposition = self.currFuel
+            # currFuel is now a CEA name after getCeaProperties.
+            # canonical() resolves it back to the CoolProp/fluid_names name.
+            self.fuelComposition = canonical(self.currFuel)
         
         if self.newOxBool:
+            # TODO: test this and make it work
+
             if len(self.newOx) == 2:
             
                 # still needed for CoolProp
@@ -491,42 +502,16 @@ class Engine():
                 self.oxComposition = self.newOx[0][3]
                 
         else:
-            # NOTE This is rather poorly designed
-            # translate currOx to a fluid name map
-            # e.g. "O2" (CEA) → "Oxygen" (CoolProp), "LOX" → "Oxygen"
-            try:
-                self.oxComposition = translate(self.currOx, 'coolprop')
-            except ValueError as e:
-                print(e)
-            try:
-                self.oxComposition = translate(self.currOx, 'cea')
-            except ValueError as e:
-                print(e)
-            try:
-                self.oxComposition = translate(self.currOx, 'rocketprops')
-            except ValueError as e:
-                print(e)
-            try:
-                self.oxComposition = translate(self.currOx, 'fluid_dict')
-            except ValueError as e:
-                print(e)
-                
-                
+            # currOx is now a CEA name (e.g. "O2") after getCeaProperties.
+            # translate back to canonical name for get_density / get_props calls.
+            # e.g. "O2" → "Oxygen",  "N2O4(L)" → "N2O4"
+            self.oxComposition = canonical(self.currOx)
 
         # density and volume/sec calcs from tanks
-        # use get_props() which tries fluid_dict → rocketprops → CoolProp in order
-        if _HAS_FLUID_NAMES:
-            _ox_rho_props  = _get_fluid_props(self.oxComposition,  self.oxTankTemp, 101325,
-                                              ['density_kg_m3'])
-            _fu_rho_props  = _get_fluid_props(self.fuelComposition, self.fuTankTemp, 101325,
-                                              ['density_kg_m3'])
-            self.rhoOX   = _ox_rho_props['density_kg_m3']   # kg/m3
-            self.rhoFuel = _fu_rho_props['density_kg_m3']   # kg/m3
-            
-        else:
-            
-            self.rhoOX   = PropsSI('D', 'T', self.oxTankTemp,  'P', 101325, self.oxComposition) # kg/m3
-            self.rhoFuel = PropsSI('D', 'T', self.fuTankTemp, 'P', 101325, self.fuelComposition) # kg/m3
+        # get_density() calls fluid_names which tries fluid_dict → rocketprops → CoolProp.
+        # Name translation (e.g. "Oxygen" → CoolProp "Oxygen") is handled inside.
+        self.rhoOX   = get_density(self.oxComposition,   self.oxTankTemp,  101325)  # kg/m3
+        self.rhoFuel = get_density(self.fuelComposition, self.fuTankTemp, 101325)  # kg/m3
 
         self.VdotOX = (self.mdotOx / self.rhoOX) * 1000 # L/s
         self.VdotFuel = (self.mdotFuel / self.rhoFuel) * 1000 # L/s
@@ -559,11 +544,11 @@ class Engine():
         print("fuel mdot (kg/s): ",round(self.mdotFuel,3))
         print("ox mdot (kg/s): ",round(self.mdotOx,3))
         print("fuel Vdot (L/s): ",round(self.VdotFuel,4))
-        print("ox Vdot (L/s): ",round(self.VdotOX,4))
+        print("ox Vdot (L/s): ",round(self.VdotLOX,4))
         print("fuel volume (L): ",round(self.volumeFuel,2))
-        print("ox volume (L): ",round(self.volumeOX,2))
+        print("ox volume (L): ",round(self.volumeLOX,2))
         print("fuel mass (kg): ",round(self.massFuel,2))
-        print("ox mass (kg): ",round(self.massOX,2))
+        print("ox mass (kg): ",round(self.massLOX,2))
         print("propellant mass (kg): ",round(self.massProp,2))
         print("Chamber volume (m3): ",round(self.Vc,6))
         print("Chamber length (m): ",round(self.Lc,6))
@@ -674,9 +659,9 @@ class Engine():
             list[float]: returns three lists that ccan be imported into CAD
             to create splines of the nozzle contour
         """
-    # saves nozzle geometry in a txt file that can be imported into CAD 
-    # software to model the engine
-        
+        # saves nozzle geometry in a txt file that can be imported into CAD 
+        # software to model the engine
+        # TODO insert logic to only run this if not already run
         self.engineContour()
 
         j = True
@@ -695,9 +680,9 @@ class Engine():
         Args:
             filePath (str): path to where the geometry will be saved
         """
-    # saves nozzle geometry in a txt file that can be imported into CAD 
-    # software to model the engine
-        
+        # saves nozzle geometry in a txt file that can be imported into CAD 
+        # software to model the engine
+        # TODO insert logic to only run this if not already run
         self.engineContour()
 
         j = True
@@ -741,20 +726,20 @@ class Engine():
             raise ValueError('INPUT VALUE FOR channelWallThickness THIS IS THE WALL THICKNESS (mm) BETWEEN COOLING CHANNELS')
         if self.numChannels == 0:
             raise ValueError('INPUT VALUE FOR numChannels THIS IS THE NUMBER OF COOLING CHANNELS AROUND THE CHAMBER')
-        # if self.oxCooled and self.oxComposition != "O2":
-        #     raise ValueError('OX REGEN COOLING ONLY SUPPORTED WITH OXYGEN ("O2" MUST BE USED FOR CEA)')
-
+        if self.oxCooled and translate(self.oxComposition, 'cea') != "O2":
+            raise ValueError('OX REGEN COOLING ONLY SUPPORTED WITH OXYGEN')
+        # TODO insert logic to only run this if not already run
         self.engineContour()
         
         if self.monoMode == 1:
             raise Exception('REGEN COOLING NOT AVAILABLE IN MONOPROP MODE\nSET ''monoMode = 0'' AND USE BI PROPELLANT MODE')
-        
+        # TODO insert logic to only run this if not already run
         self.propFlowRates()
         
         # #
         # #
         # #
-        # # FIX
+        # # TODO : FIX
         # #
         # #
         # #
@@ -854,11 +839,6 @@ class Engine():
         
         # k = ((self.gamma+1)/(2*(self.gamma-1)))
         const1 = (0.026/(self.Dt**0.2))*((self.Pc/self.Cstar)**0.8)
-        
-        ####################################################
-        ####################################################
-        
-        # this shit broke (no longer a jank fix)
 
         m1 = (1 - self.Me) / (1 - (self.Ae/self.At))
         b1 = 1-abs(m1)
@@ -866,107 +846,42 @@ class Engine():
         m2 = (0.05 - 1) / ((self.Ac/self.At) - 1)
         b2 = 1+abs(m2)
         
-        ####################################################
-        ####################################################
-        
         tempCp  = 0
         tempMu  = 0
         tempRho = 0
-        tempArray = np.round(np.arange(self.coolantTempStart, 500, self.temp_step),2)
+        tempArray = np.round(np.arange(self.coolantTempStart, 500, self.temp_step), 2)
 
-        # select coolant for regen cooling
-        if self.oxCooled:
-            coolant_fluid = self.oxComposition
-        else:
-            coolant_fluid = self.fuelComposition
+        # Select coolant fluid name — already in canonical/CoolProp format
+        # from propFlowRates (oxComposition and fuelComposition are set there).
+        coolant_fluid = self.oxComposition if self.oxCooled else self.fuelComposition
 
-        # ── Unified fluid property lookup ─────────────────────────────────────
-        # get_props() from fluid_names.py tries sources in priority order:
-        #   1. fluid_dict  — in-memory cache, zero I/O after first call
-        #   2. rocketprops — fast, covers LOX, RP-1, MMH, N2H4, N2O4, etc.
-        #   3. CoolProp    — broadest coverage including mixtures; slowest
-        #
-        # Name translation is handled inside get_props() so coolant_fluid can
-        # be any format (CoolProp, CEA, RocketProps, canonical) — it is
-        # resolved to the correct string for whichever source answers first.
-        #
-        # Results are written back into fluid_dict on a cache miss so
-        # subsequent calls within the same session are fully served from memory.
-        _P = float(self.Pc)
+        # TODO make sure this works with all props
+        # Build per-temperature property tables via fluid_names.get_props().
+        # get_props() handles the full lookup chain internally:
+        #   1. fluid_dict (O(1) in-memory cache — free after first session call)
+        #   2. rocketprops (fast fits — covers LOX, Ethanol, RP-1, MMH, etc.)
+        #   3. CoolProp   (EOS accuracy — supports pure fluids and mixtures)
+        # Results from rocketprops or CoolProp are written back into the
+        # in-memory fluid_dict cache so the next call in this session is free.
+        # Engine_Class has no fluid_dict / CoolProp / rocketprops imports here.
         _props_needed = ['density_kg_m3', 'dynamic_viscosity_Pa_s', 'specific_heat_J_kgK']
+        _P = float(self.Pc)
         rho_list, mu_list, Cp_list = [], [], []
 
-        # Load fluid_dict for write-back on cache misses
-        try:
-            import os as _os2, sys as _sys2, importlib.util as _ilu2, importlib as _il2
-            _fd_path2 = _os2.path.join(
-                _os2.path.dirname(_os2.path.abspath(__file__)), 'fluid_dict.py')
-            if 'fluid_dict' not in _sys2.modules and _os2.path.exists(_fd_path2):
-                _spec2 = _ilu2.spec_from_file_location('fluid_dict', _fd_path2)
-                _fd_mod2 = _il2.util.module_from_spec(_spec2)
-                _spec2.loader.exec_module(_fd_mod2)
-                _sys2.modules['fluid_dict'] = _fd_mod2
-            _add_state = _sys2.modules['fluid_dict'].add_fluid_state
-        except Exception:
-            _add_state = None
-
         for _T in tempArray:
-            _T = float(_T)
-            if _HAS_FLUID_NAMES:
-                # try:
-                _p = _get_fluid_props(coolant_fluid, _T, _P, _props_needed)
-                rho_list.append(_p['density_kg_m3'])
-                mu_list.append(_p['dynamic_viscosity_Pa_s'])
-                Cp_list.append(_p['specific_heat_J_kgK'])
-                # write back to fluid_dict if the answer came from rocketprops or coolprop
-                if _p.get('_source') != 'fluid_dict' and _add_state is not None:
-                    _fd_k = fluid_dict_key(coolant_fluid) if _HAS_FLUID_NAMES else coolant_fluid
-                    try:
-                        from fluid_names import fluid_dict_key
-                        _fd_k = fluid_dict_key(coolant_fluid)
-                    except Exception:
-                        _fd_k = coolant_fluid
-                    try:
-                        _k_val = float(PropsSI('L', 'T', _T, 'P', _P,
-                                        translate(coolant_fluid, 'coolprop')))
-                    except Exception:
-                        _k_val = self.Kc
-                    _add_state(_fd_k, round(_T, 4), round(_P, 2), {
-                        'temperature_K':             _T,
-                        'pressure_Pa':               _P,
-                        'density_kg_m3':             _p['density_kg_m3'],
-                        'dynamic_viscosity_Pa_s':    _p['dynamic_viscosity_Pa_s'],
-                        'specific_heat_J_kgK':       _p['specific_heat_J_kgK'],
-                        'thermal_conductivity_W_mK': _k_val,
-                        'prandtl_number': (
-                            _p['dynamic_viscosity_Pa_s'] * _p['specific_heat_J_kgK']
-                            / _k_val if _k_val else 0),
-                        'notes': f'Auto-populated via {_p.get("_source","?")}'
-                                    f' @ T={_T}K P={_P}Pa',
-                    })
-                # except Exception:
-                #     # last-resort direct CoolProp call
-                #     cp_str = translate(coolant_fluid, 'coolprop')
-                #     rho_list.append(float(PropsSI('D', 'T', _T, 'P', _P, cp_str)))
-                #     mu_list.append(float(PropsSI('V', 'T', _T, 'P', _P, cp_str)))
-                #     Cp_list.append(float(PropsSI('C', 'T', _T, 'P', _P, cp_str)))
-            else:
-                # fluid_names not available — direct CoolProp (original behaviour)
-                rho_list.append(float(PropsSI('D', 'T', _T, 'P', _P, coolant_fluid)))
-                mu_list.append(float(PropsSI('V', 'T', _T, 'P', _P, coolant_fluid)))
-                Cp_list.append(float(PropsSI('C', 'T', _T, 'P', _P, coolant_fluid)))
-            rho = np.array(rho_list)
-            mu  = np.array(mu_list)
-            Cp  = np.array(Cp_list)
-        else:
-            rho = PropsSI('D', 'T', tempArray, 'P', self.Pc, coolant_fluid)
-            mu  = PropsSI('V', 'T', tempArray, 'P', self.Pc, coolant_fluid)
-            Cp  = PropsSI('C', 'T', tempArray, 'P', self.Pc, coolant_fluid)
+            _p = get_props(coolant_fluid, float(_T), _P, _props_needed)
+            rho_list.append(_p['density_kg_m3'])
+            mu_list.append(_p['dynamic_viscosity_Pa_s'])
+            Cp_list.append(_p['specific_heat_J_kgK'])
 
-        # map the temperature arrays to the specific heat, density, and viscousity
-        self.CpDict  = dict(zip(tempArray, Cp))   
-        self.muDict  = dict(zip(tempArray, mu))   
-        self.rhoDict = dict(zip(tempArray, rho))  
+        rho = np.array(rho_list)
+        mu  = np.array(mu_list)
+        Cp  = np.array(Cp_list)
+
+        # map the temperature arrays to specific heat, density, and viscosity
+        self.CpDict  = dict(zip(tempArray, Cp))
+        self.muDict  = dict(zip(tempArray, mu))
+        self.rhoDict = dict(zip(tempArray, rho))
 
         for i in range(len(X)):
             
@@ -1014,24 +929,6 @@ class Engine():
                     
                 A = np.pi*(Y[i]**2)
                 
-                # # this shit is broke and fucks everything up
-                # #############################################
-                # if X[i] >= 0:
-                #     M[i] = ((((((A/Astar)**(1/k)) * (1 + ((gamma-1)/2))) - 1)/((gamma-1)/2))**(1/(1+k)))
-                # if X[i] < 0:
-                #     M[i] = 0.5
-                # #############################################
-                
-                # # fix testing
-                # #############################################
-
-                # M[i] = (((((A/Astar) * ((1 + ((gamma-1)/2)))**k) - 1)/(((gamma-1)/2)**k))**(1/(k - 1)))
-                # # M[i] = (((((A/Astar)/((2/(gamma+1))**k)) - 1) / (((gamma-1)/2)**k))**(1/(2*k)))
-                # # if X[i] == 0:
-                # #     print(M[i])
-
-                #############################################
-                
                 # fix testing x2
                 # this assumes area ratio vs Ma is linear
                 #############################################
@@ -1046,19 +943,7 @@ class Engine():
                 
                 self.T[i]   = (self.Tc / (1+ ((self.gamma-1)/2) * self.M[i]**2))
                 self.Tr[i]  = (self.T[i]*(1+((self.gamma-1)/2)*r*(self.M[i]**2)))
-                self.oTo[i] = ((self.T[i]+self.Tw1[i])/2)
-                
-                
-                # the arith. mean temp has negligible impact from error
-                # when Ma is higher than low supersonic
-                # if M[i] < 1.1:
-                #     oTo[i] = ((T[i]+Tw1[i])/2)
-                    
-                # # this limits the mean arth. temp to lower mach numbers
-                # # not known yet if this is a reasonable fix or not
-                # else:
-                #     Tss = (Tc / (1 + ((gamma-1)/2) * 1.1**2))
-                #     oTo[i] = ((Tss+Tw1[i])/2)                
+                self.oTo[i] = ((self.T[i]+self.Tw1[i])/2)          
                 
                 self.hg[i] = (const1*((self.Dt/(2*Y[i]))**1.8)*self.cp*(muE**0.2)*((self.Te/self.oTo[i])**(0.8-0.2*w)))
                 
@@ -1107,7 +992,7 @@ class Engine():
             self.thermalStress[i] = ((self.youngMod * 1000) * self.coefThermEx * (abs(self.Tw1[i] - self.Tw2[i])))
 
             # once the calculations pass the nozzle and reach the radius
-            # of the chamber, lower the number of channels
+            # of the chamber, lower the number of channels if that is selected
             if pastThroat == True and Y[i] == self.Rc:
                 self.numChannels = numChannelsChamber
 
@@ -1118,7 +1003,7 @@ class Engine():
         self.Tw2          = self.Tw2[::-1]
         self.thermalStress= self.thermalStress[::-1]
         self.channelWidth = self.channelWidth[::-1]
-        # change bacck to mm
+        # change back to mm
         self.channelWidth = self.channelWidth* 1000
         self.TCoolant     = self.TCoolant[::-1]
         self.coolV        = self.coolV[::-1]
@@ -1129,7 +1014,7 @@ class Engine():
         print('Max Thermal Stress in Nozzle (MPa): ',round(max(self.thermalStress),0))
         
     def plotEngineContour(self):
-        
+        # TODO insert logic to only run this if not already run
         self.engineContour()
         
         x=np.arange(-200,150,10, dtype=(int))
@@ -1147,7 +1032,7 @@ class Engine():
         plt.show()
         
     def plotNozzleContour(self):
-        
+        # TODO insert logic to only run this if not already run
         self.engineContour()
         
         x=np.arange(-200,150,10, dtype=(int))
@@ -1165,12 +1050,12 @@ class Engine():
         plt.show()
         
     def heatTransferPlots(self):
-        
+        # TODO insert logic to only run this if not already run
         self.engineContour()
         
         if self.monoMode == 1:
             raise Exception('HEAT TRANSFER PLOTS NOT AVAILABLE IN MONOPROP MODE\nSET ''monoMode = 0'' AND USE BI PROPELLANT MODE')
-        
+        # TODO insert logic to only run this if not already run
         self.propFlowRates()
         self.heatTransfer()
         
@@ -1254,7 +1139,7 @@ class Engine():
         plt.show()
         
     def allPlots(self):
-        
+        # TODO insert logic to only run this if not already run
         self.engineContour()
         
         x=np.arange(-200,150,10, dtype=(int))
@@ -1284,7 +1169,7 @@ class Engine():
         
         if self.monoMode == 1:
             return
-        
+        # TODO insert logic to only run this if not already run
         self.propFlowRates()
         self.heatTransfer()
         self.plotIspVOF()
@@ -1367,7 +1252,7 @@ class Engine():
         plt.show()
         
     def savePlots(self, dpi):
-        
+        # TODO insert logic to only run this if not already run
         self.engineContour()
         
         x=np.arange(-160,100,10, dtype=(int))
@@ -1394,7 +1279,7 @@ class Engine():
         
         if self.monoMode == 1:
             return
-        
+        # TODO insert logic to only run this if not already run
         self.propFlowRates()
         self.heatTransfer()
         
@@ -1529,7 +1414,7 @@ class Engine():
             plt.close(fig)
             saved_plots.append({'title': title, 'path': os.path.abspath(fname)})
 
-
+        # TODO insert logic to only run this if not already run
         # run analyses
         self.engineContour()
         
@@ -1552,6 +1437,7 @@ class Engine():
         ))
 
         if not self.monoMode and not self.newOxBool:
+            # TODO insert logic to only run this if not already run
             self.propFlowRates()
             self.heatTransfer()
             if self.plot_isp_vs_of:
