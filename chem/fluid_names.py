@@ -118,16 +118,10 @@ FLUID_NAME_MAP: dict[str, dict[str, Optional[str]]] = {
         "rocketprops":  "H2O2",
         "fluid_dict":   "H2O2",
     },
-    "RFNA": {
-        "coolprop":     None,           # CoolProp does not carry IRFNA
-        "cea":          "HNO3(L)",
-        "rocketprops":  "IRFNA",
-        "fluid_dict":   "IRFNA",
-    },
-    "WFNA": {
+    "Nitric Acid": {
         "coolprop":     None,           # CoolProp does not carry WFNA
         "cea":          "HNO3(L)",
-        "rocketprops":  None,           # RocketProps does not carry WFNA
+        "rocketprops":  "IRFNA",           # RocketProps does not carry WFNA
         "fluid_dict":   "HNO3",
     },
     "Fluorine": {
@@ -136,11 +130,11 @@ FLUID_NAME_MAP: dict[str, dict[str, Optional[str]]] = {
         "rocketprops":  "F2",
         "fluid_dict":   "Fluorine",
     },
-    "ClF3": {
+    "CLF3": {
         "coolprop":     None,           # CoolProp does not carry CLF3
         "cea":          "ClF3(L)",
         "rocketprops":  None,           # RocketProps does not carry CLF3
-        "fluid_dict":   "ClF3",
+        "fluid_dict":   "CLF3",
     },
     "CLF5": {
         "coolprop":     None,           # CoolProp does not carry CLF5
@@ -183,7 +177,7 @@ FLUID_NAME_MAP: dict[str, dict[str, Optional[str]]] = {
 
     "Ethanol": {
         "coolprop":     "Ethanol",
-        "cea":          "C2H5OH(L)",
+        "cea":          "C2H5OH",
         "rocketprops":  "Ethanol",
         "fluid_dict":   "Ethanol",
     },
@@ -231,7 +225,7 @@ FLUID_NAME_MAP: dict[str, dict[str, Optional[str]]] = {
     },
     "UDMH": {
         "coolprop":     None,           # CoolProp does not carry UDMH
-        "cea":          "C2H8N2(L),UDMH	",
+        "cea":          "C2H8N2(L),UDMH",
         "rocketprops":  "UDMH",
         "fluid_dict":   "UDMH",
     },
@@ -400,14 +394,14 @@ ALIASES: dict[str, str] = {
     "O2":           "Oxygen",
     "O2(L)":        "Oxygen",
     "F2(L)":        "Fluorine",
-    "H2(L)":        "ParaHydrogen",
-    "N2O4(L)":      "N2O4",
-    "H2O2(L)":      "H2O2",
+    "H2(L)":        "Hydrogen",
+    "N2O4(L)":      "NTO",
+    "H2O2(L)":      "Peroxide",
     "N2H4(L)":      "Hydrazine",
     "CH6N2(L)":     "MMH",
     "CH3OH(L)":     "Methanol",
-    "C2H5OH(L)":    "Ethanol",
-    "C3H7OH(L)":    "Propanol",
+    "C2H5OH":       "Ethanol",
+    "C3H7OH(L)":    "IPA",
     "CH4(L)":       "Methane",
     "N2(L)":        "Nitrogen",
     "NH3(L)":       "Ammonia",
@@ -421,20 +415,24 @@ ALIASES: dict[str, str] = {
     "C6H6(L)":      "Benzene",
     "C7H8(L)":      "Toluene",
     "o-C8H10(L)":   "Xylene",
-    "ClF3(L)":      "ClF3",
-    "ClF5(L)":      "ClF5",
-    "HNO3(L)":      "HNO3",
+    "ClF3(L)":      "CLF3",
+    "ClF5(L)":      "CLF5",
+    "HNO3(L)":      "Nitric Acid",
     "N2O":          "NitrousOxide",
     "RP-1":         "RP1",
     "A-50":         "A50",
+    "C2H8N2(L),UDMH": "UDMH",
+    "C8H18(L),n-octa": "Gasoline",
+    "Jet-A(L)":     "JetA",
+    "M20":          "M20",
 
     # ── RocketProps short names → canonical ───────────────────────────────────
     "LOX":          "Oxygen",
     "LF2":          "Fluorine",
     "LCH4":         "Methane",
     "LN2":          "Nitrogen",
-    "LH2":          "ParaHydrogen",
-    "IPA":          "Propanol",
+    "LH2":          "Hydrogen",
+    "IPA":          "IPA",
     "n-Butane":     "Butane",
 
     # ── Mixture weight-percent shorthand aliases ───────────────────────────────
@@ -453,18 +451,22 @@ ALIASES: dict[str, str] = {
     "IPA70":                            "Propanol[.4116]&Water[.5884]",
     "FLOX70":                           "Fluorine[.6637]&Oxygen[.3363]",
     "FLOX82":                           "Fluorine[.798]&Oxygen[.202]",
+    "FLOX70":                           "Fluorine[.6637]&Oxygen[.3363]",
+    "FLOX60":                           "Fluorine[.559]&Oxygen[.441]",
+    "FLOX80":                           "Fluorine[.771]&Oxygen[.229]",
 
     # ── Common informal / lowercase shorthands ────────────────────────────────
     "lox":              "Oxygen",
     "ethanol":          "Ethanol",
     "methanol":         "Methanol",
     "water":            "Water",
-    "h2o2":             "H2O2",
-    "n2o4":             "N2O4",
+    "h2o2":             "Peroxide",
+    "n2o4":             "NTO",
     "fluorine":         "Fluorine",
-    "clf3":             "ClF3",
-    "clf5":             "ClF5",
-    "ipa":              "Propanol",
+    "clf3":             "CLF3",
+    "clf5":             "CLF5",
+    "ipa":              "IPA",
+    "propanol":         "IPA",
     "a50":              "A50",
     "aerozine":         "A50",
     "aerozine-50":      "A50",
@@ -477,8 +479,8 @@ ALIASES: dict[str, str] = {
     "butane":           "Butane",
     "ethylene":         "Ethylene",
     "propylene":        "Propylene",
-    "nitric acid":      "HNO3",
-    "fuming nitric":    "HNO3",
+    "nitric acid":      "Nitric Acid",
+    "fuming nitric":    "Nitric Acid",
     "carbon monoxide":  "CarbonMonoxide",
 }
 
@@ -576,13 +578,62 @@ def list_fluids() -> list[str]:
 
 
 # =============================================================================
-# Module-level fluid_dict cache
+# SQLite database connection
 # =============================================================================
-# Loaded once on first call to get_props(); reused for the lifetime of the
-# Python session via sys.modules.  Engine_Class never imports fluid_dict or
-# CoolProp or rocketprops directly — all calls go through get_props() here.
+# All persistent fluid property data is stored in fluid_props.db (SQLite).
+# The connection is opened once via fluid_db.get_db() and reused for the
+# lifetime of the Python session — no repeated file I/O.
+#
+# fluid_dict.py is still supported as a legacy in-memory fallback: if
+# fluid_props.db is not found but fluid_dict.py is present, the old Python
+# dict is used automatically with no code changes required.
+#
+# Priority order inside get_props():
+#   1. SQLite DB (fluid_props.db)  — indexed disk lookup, low memory
+#   2. Legacy fluid_dict.py        — in-memory Python dict (backward compat)
+#   3. rocketprops                 — live computation, fast curve fits
+#   4. CoolProp                    — live computation, full EOS accuracy
+#
+# Results from rocketprops or CoolProp are written back into the SQLite DB
+# so the next call is served from the DB with no live computation.
 
-_fluid_dict_loaded: bool = False          # sentinel so we only attempt load once
+_db_attempted: bool = False   # sentinel — attempt DB open only once per session
+
+def _get_db():
+    """
+    Return the FluidDB singleton, or None if fluid_db.py is not available.
+    Attempts the connection only once; caches None on failure so repeated
+    calls don't retry a missing file.
+    """
+    global _db_attempted
+    if _db_attempted:
+        # Return whatever was cached (could be None if DB unavailable)
+        import sys
+        return sys.modules.get('_fluid_db_instance')
+    _db_attempted = True
+    import sys, os, importlib.util
+    _db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fluid_db.py')
+    if not os.path.exists(_db_path):
+        print("[fluid_names] NOTE: fluid_db.py not found — "
+              "falling back to fluid_dict.py / live sources.")
+        sys.modules['_fluid_db_instance'] = None
+        return None
+    try:
+        _spec = importlib.util.spec_from_file_location('fluid_db', _db_path)
+        _mod  = importlib.util.module_from_spec(_spec)
+        _spec.loader.exec_module(_mod)
+        sys.modules['fluid_db'] = _mod
+        _db = _mod.get_db()
+        sys.modules['_fluid_db_instance'] = _db
+        return _db
+    except Exception as _e:
+        print(f"[fluid_names] WARNING: could not open fluid_props.db — {_e}")
+        sys.modules['_fluid_db_instance'] = None
+        return None
+
+
+# Legacy fluid_dict.py support (backward compatibility)
+_fluid_dict_loaded: bool = False
 
 def _load_fluid_dict() -> None:
     """Import fluid_dict.py into sys.modules if not already loaded."""
@@ -604,23 +655,37 @@ def _load_fluid_dict() -> None:
 
 def _write_back(fd_key: str, T_K: float, P_Pa: float, result: dict) -> None:
     """
-    Write a property set returned by rocketprops or CoolProp back into the
-    in-memory fluid_dict so subsequent calls are served from cache.
-    Only writes keys that fluid_dict recognises (excludes '_source').
+    Write a result from rocketprops or CoolProp into the SQLite DB so the
+    next call for this (fluid, T, P) is served from the DB.
+    Also writes into the legacy in-memory fluid_dict if it is loaded.
+    Both writes are best-effort — never raises.
     """
-    import sys
-    if 'fluid_dict' not in sys.modules:
-        return
+    entry = {k: v for k, v in result.items() if k != '_source'}
+    entry.setdefault('temperature_K', T_K)
+    entry.setdefault('pressure_Pa',   P_Pa)
+    source = result.get('_source', 'unknown')
+    note   = f"Auto-populated via {source}"
+
+    # Write to SQLite DB
     try:
-        _add = sys.modules['fluid_dict'].add_fluid_state
-        _fd  = sys.modules['fluid_dict'].fluid_dict
-        entry = {k: v for k, v in result.items() if k != '_source'}
-        entry['temperature_K'] = T_K
-        entry['pressure_Pa']   = P_Pa
-        entry.setdefault('notes', f"Auto-populated via {result.get('_source','?')}")
-        _add(fd_key, round(T_K, 4), round(P_Pa, 2), entry)
+        _db = _get_db()
+        if _db is not None:
+            _db.insert(fd_key, T_K, P_Pa, entry, source=source,
+                       notes=note, overwrite=False)
+            _db.commit()
     except Exception:
-        pass   # write-back is best-effort; never raise from here
+        pass
+
+    # Also keep legacy in-memory dict in sync (if loaded)
+    import sys
+    if 'fluid_dict' in sys.modules:
+        try:
+            _add = sys.modules['fluid_dict'].add_fluid_state
+            entry2 = dict(entry)
+            entry2.setdefault('notes', note)
+            _add(fd_key, round(T_K, 4), round(P_Pa, 2), entry2)
+        except Exception:
+            pass   # write-back is best-effort; never raise from here
 
 
 # =============================================================================
@@ -680,27 +745,41 @@ def get_props(name: str, T_K: float, P_Pa: float,
     """
     import sys
 
-    # Ensure fluid_dict is loaded into the module cache
+    # Initialise both data sources (DB and legacy dict) on first call.
+    # _get_db() and _load_fluid_dict() are no-ops after the first call.
+    _db = _get_db()
     _load_fluid_dict()
 
     canon  = canonical(name)
-    fd_key = fluid_dict_key(canon)         # canonical = CoolProp key = fluid_dict key
+    fd_key = fluid_dict_key(canon)   # canonical = CoolProp key = DB key
+    cp_key = translate(canon, 'coolprop')
 
-    # ── 1. fluid_dict ─────────────────────────────────────────────────────────
-    # Pure O(1) hash lookups — no I/O, no external library calls.
-    if prefer_source in (None, 'fluid_dict'):
-        if 'fluid_dict' in sys.modules:
-            _fd    = sys.modules['fluid_dict'].fluid_dict
-            _entry = _fd.get(fd_key, {}).get((round(T_K, 4), round(P_Pa, 2)))
-            if _entry is not None:
-                result = {k: _entry[k] for k in properties if k in _entry}
-                if len(result) == len(properties):
-                    result['_source'] = 'fluid_dict'
-                    return result
-                # Partial hit — fall through to get remaining properties from
-                # a live source, then write the full set back to cache.
+    # ── 1. SQLite database (fluid_props.db) ───────────────────────────────────
+    # Single indexed B-tree seek — effectively constant time for any
+    # realistic dataset size.  Only the requested row is loaded into memory.
+    if prefer_source in (None, 'db', 'fluid_dict') and _db is not None:
+        _row = _db.lookup(fd_key, T_K, P_Pa)
+        if _row is not None:
+            result = {k: _row[k] for k in properties if k in _row and _row[k] is not None}
+            if len(result) == len(properties):
+                result['_source'] = 'db'
+                return result
+            # Partial row — fall through to live source for missing properties.
 
-    # ── 2. rocketprops ────────────────────────────────────────────────────────
+    # ── 2. Legacy fluid_dict.py (in-memory Python dict) ───────────────────────
+    # Used when fluid_props.db is absent (backward compatibility) or when
+    # the DB row doesn't contain all requested properties.
+    if prefer_source in (None, 'fluid_dict') and 'fluid_dict' in sys.modules:
+        _fd    = sys.modules['fluid_dict'].fluid_dict
+        _entry = _fd.get(fd_key, {}).get((round(T_K, 4), round(P_Pa, 2)))
+        if _entry is not None:
+            result = {k: _entry[k] for k in properties
+                      if k in _entry and _entry[k] is not None}
+            if len(result) == len(properties):
+                result['_source'] = 'fluid_dict'
+                return result
+
+    # ── 3. rocketprops ────────────────────────────────────────────────────────
     # Fast pre-computed fits.  Covers LOX, LH2, LCH4, Ethanol, MMH, N2H4,
     # N2O4, RP-1, H2O2, A50, and other common propellants.
     # Does NOT support CoolProp mixture strings.
@@ -740,9 +819,10 @@ def get_props(name: str, T_K: float, P_Pa: float,
                 _write_back(fd_key, T_K, P_Pa, result)
                 return result
         except (ValueError, ImportError, Exception):
+            # print(f"{rp_key} returns None in rocketprops")
             pass   # not supported by rocketprops → fall through to CoolProp
 
-    # ── 3. CoolProp ───────────────────────────────────────────────────────────
+    # ── 4. CoolProp ───────────────────────────────────────────────────────────
     # Equation-of-state accuracy.  Supports pure fluids and mixtures.
     if prefer_source in (None, 'coolprop'):
         try:
