@@ -23,6 +23,7 @@ def get_Nitric_Acid_props(T_K: float, P_Pa: float) -> dict:
     if T_K > 1200:
         A=97.45959,     B=5.429577,     C=-1.029688,    D=0.067950
         E=-12.29314,    F=-192.4912,    G=343.8051,     H=-134.3060
+    return None
         
 
 def get_Jet_A_props(T_K: float, P_Pa: float) -> dict:
