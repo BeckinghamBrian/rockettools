@@ -3,6 +3,12 @@ __pycache__/
 *.py[codz]
 *$py.class
 
+# database files
+*.db*
+*.db
+*/*.db
+*.sql
+
 # C extensions
 *.so
 
@@ -37,6 +43,7 @@ MANIFEST
 
 # output files
 output/
+*./output/
 
 # Unit test / coverage reports
 htmlcov/
@@ -179,6 +186,8 @@ lib/
 # Misc stuff
 package*.json
 node_modules/
+_*
+fluid_properties.db
 
 # Spyder project settings
 .spyderproject
